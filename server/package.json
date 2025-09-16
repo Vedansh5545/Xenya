@@ -1,0 +1,18 @@
+{
+  "name": "xenya-server",
+  "version": "1.0.0",
+  "description": "Xenya Phase 1 API: Ollama chat, memory, resilient search, URL summarization, RSS, research.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@mozilla/readability": "^0.5.0",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "jsdom": "^24.0.0",
+    "rss-parser": "^3.13.0"
+  }
+}
