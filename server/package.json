@@ -1,7 +1,7 @@
 {
   "name": "xenya-server",
   "version": "1.0.0",
-  "description": "Xenya Phase 1 API: Ollama chat, memory, resilient search, URL summarization, RSS, research.",
+  "description": "Xenya Phase 1 API: Ollama chat, memory, resilient search, URL summarization, RSS, research, model manager.",
   "type": "module",
   "main": "server.js",
   "scripts": {

@@ -1,36 +1,27 @@
-const j = (res) => {
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`)
+const parse = async (res) => {
+  if (!res.ok) {
+    try { const j = await res.json(); throw new Error(j?.error || `HTTP ${res.status}: ${res.statusText}`) }
+    catch { throw new Error(`HTTP ${res.status}: ${res.statusText}`) }
+  }
   return res.json()
 }
-
-export async function api(path, { method = 'GET', body, headers } = {}) {
-  const init = {
-    method,
-    headers: { 'Content-Type': 'application/json', ...(headers || {}) }
-  }
+export async function api(path, { method='GET', body, headers } = {}) {
+  const init = { method, headers: { 'Content-Type': 'application/json', ...(headers||{}) } }
   if (body) init.body = typeof body === 'string' ? body : JSON.stringify(body)
   const res = await fetch(path, init)
-  return j(res)
+  return parse(res)
 }
-
-// Phase 1 endpoints
 export const chat = ({ messages, system = '', model } = {}) =>
-  api('/api/chat', { method: 'POST', body: { messages, system, model } })
+  api('/api/chat', { method:'POST', body:{ messages, system, model } })
+export const summarizeUrl = (url, model) =>
+  api('/api/summary?url='+encodeURIComponent(url)+(model?`&model=${encodeURIComponent(model)}`:''))
 
-export const research = (q) =>
-  api('/api/research?q=' + encodeURIComponent(q))
+export const research = (q, model) =>
+  api('/api/research?q='+encodeURIComponent(q)+(model?`&model=${encodeURIComponent(model)}`:''))
 
-export const search = (q, n = 5) =>
-  api('/api/search?q=' + encodeURIComponent(q) + '&n=' + n)
+export const rss = () => api('/api/rss')
 
-export const rss = (feedsCsv) =>
-  api('/api/rss' + (feedsCsv ? `?feeds=${encodeURIComponent(feedsCsv)}` : ''))
-
-export const summarizeUrl = (url) =>
-  api('/api/summary?url=' + encodeURIComponent(url))
-
-// memory helpers (optional UI)
-export const memorySet = (userId, key, value) =>
-  api('/api/memory', { method: 'POST', body: { userId, action: 'set', key, value } })
-export const memoryGet = (userId, key) =>
-  api('/api/memory', { method: 'POST', body: { userId, action: 'get', key } })
+// Model manager
+export const listModels = () => api('/api/models')
+export const selectModel = (name) => api('/api/models/select', { method:'POST', body:{ name } })
+export const refreshModels = () => api('/api/models/refresh', { method:'POST' })
