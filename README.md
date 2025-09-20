@@ -426,11 +426,24 @@ For x86\_64 binaries on Apple Silicon, install **Rosetta** and use `arch -x86_64
 
 ```bash
 # Terminal A
-cd Xenya-2/server
+# from your current prompt in .../Xenya-3/client
+cd server
+
+# (optional) create the Python venv at project root if you haven’t already
+[ -d ../.venv ] || python3 -m venv ../.venv
+source ../.venv/bin/activate
+pip install -U pip vosk soundfile piper-tts
+
+# quick sanity checks (these files/dirs must exist)
+ls -1 stt_py.py
+ls -1 models/vosk/vosk-model-small-en-us-0.15/am
+
+# run the server and tell it which Python to use for STT
 VENV_PY="$(cd .. && pwd)/.venv/bin/python" node server.js
 
+
 # Terminal B
-cd Xenya-2/client
+cd client
 npm run dev
 ```
 
