@@ -3,9 +3,11 @@ import './theme.css'
 import Notes from './components/Notes.jsx'
 import MarkdownMessage from './components/MarkdownMessage.jsx'
 import { chat, research, summarizeUrl, rss, listModels, selectModel, refreshModels } from './lib/api'
+import TTSControls from './components/TTSControls.jsx'
+import { speak } from './lib/tts/speak'
+import Mic from './components/Mic.jsx'
 
 // ---------- Helpers ----------
-const uid = () => Math.random().toString(36).slice(2,9)
 const LS_KEY = 'xenya.chats.v1'
 const loadChats = () => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || [] } catch { return [] } }
 const saveChats = (d) => localStorage.setItem(LS_KEY, JSON.stringify(d))
@@ -17,6 +19,18 @@ const wantsNews = (s) => {
   return /^\s*\/news\s*$/i.test(t)
       || /\b(today'?s|latest)\b.*\bnews\b/i.test(t)
       || /\bnews\b(?:\s+(?:today|now|please))?\s*$/i.test(t)
+}
+
+// Strong, collision-resistant ids
+const uid = () =>
+  (typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID().slice(0, 8)
+    : (Date.now().toString(36) + Math.random().toString(36).slice(2, 10)).slice(0, 8))
+
+const makeId = (taken = new Set()) => {
+  let id = uid()
+  while (taken.has(id)) id = uid()
+  return id
 }
 
 // Router: /research → research, URL → summary, news → rss, else → chat
@@ -76,6 +90,11 @@ export default function App(){
     "When the user requests a plan/schedule (e.g., timetable, study plan) and details are missing, produce a concise, sensible draft with clear assumptions, then ask for 2–3 quick tweaks."
   )
 
+  // TTS / STT state
+  const [lastReply, setLastReply] = useState('')
+  const [autoSpeak, setAutoSpeak] = useState(true)
+  const [autoSendFromMic] = useState(true) // auto-send transcript after STT
+
   const endRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -89,16 +108,37 @@ export default function App(){
     try { const r = await listModels(); setModels(r.models||[]); setActiveModel(r.active||'') } catch(e){ console.error(e) }
   })() },[])
 
-  // ensure active chat exists
-  useEffect(()=>{
-    if (!chats.find(c=>c.id===activeId)){
-      setChats(prev=>{
-        const next=[...prev,{id:activeId,title:'New chat',messages:[],role:roleText}]
-        saveChats(next)
-        return next
-      })
+  // one-time: de-dupe chats loaded from LS and fix activeId if necessary + ensure active chat exists
+  useEffect(() => {
+    let changed = false
+    const seen = new Set()
+    const fixed = (Array.isArray(chats) ? chats : []).map(c => {
+      let id = String(c.id || '')
+      if (!id || seen.has(id)) { id = makeId(seen); changed = true }
+      seen.add(id)
+      return { ...c, id }
+    })
+
+    let list = fixed
+    if (fixed.length === 0) {
+      const id = makeId(seen)
+      list = [{ id, title:'New chat', messages:[], role: roleText }]
+      changed = true
+      if (activeId !== id) setActiveId(id)
+    } else if (!fixed.some(c => c.id === activeId)) {
+      setActiveId(fixed[0].id)
     }
-  },[activeId])
+
+    if (changed) { setChats(list); saveChats(list) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])  // run once
+
+  // guard: if activeId ever points to a non-existent chat
+  useEffect(() => {
+    if (chats.length && !chats.some(c => c.id === activeId)) {
+      setActiveId(chats[0].id)
+    }
+  }, [chats, activeId])
 
   // load role when switching chats
   useEffect(()=>{ setRoleText(activeChat.role || roleText) },[activeId])
@@ -106,7 +146,14 @@ export default function App(){
   // autoscroll
   useEffect(()=>{ endRef.current?.scrollIntoView({behavior:'smooth'}) },[activeChat.messages])
 
-  const newChat = ()=> setActiveId(uid())
+  // create a new chat immediately (prevents race/dup keys)
+  const newChat = ()=>{
+    const taken = new Set(chats.map(c => c.id))
+    const id = makeId(taken)
+    const chat = { id, title:'New chat', messages:[], role: roleText }
+    setChats(prev=>{ const next=[chat, ...prev]; saveChats(next); return next })
+    setActiveId(id)
+  }
 
   const titleFromFirstUser = (chat) => {
     const first = chat?.messages?.find(m=>m.role==='user')?.content || 'New chat'
@@ -132,7 +179,7 @@ export default function App(){
       let next = filtered
       let nextActive = activeId
       if (filtered.length === 0){
-        const nid = uid()
+        const nid = makeId()
         next = [{ id:nid, title:'New chat', messages:[], role: roleText }]
         nextActive = nid
       } else if (id === activeId){
@@ -164,9 +211,20 @@ export default function App(){
   }
   const cancelRename = () => { setEditingId(null); setEditingText('') }
 
-  // -------- send --------
-  const send = async () => {
-    const content = input.trim()
+  // Save role/system prompt into the active chat (fixes onBlur crash)
+  const saveRole = () => {
+    setChats(prev=>{
+      const next = prev.map(c =>
+        c.id === activeId ? { ...c, role: roleText } : c
+      )
+      saveChats(next)
+      return next
+    })
+  }
+
+  // ======= SEND helpers so Mic can reuse =======
+  const sendFromText = async (text) => {
+    const content = (text || '').trim()
     if (!content) return
     setInput('')
 
@@ -180,12 +238,17 @@ export default function App(){
     try {
       const rolePrompt = (activeChat.role?.trim() || roleText || 'You are Xenya — brisk, clear, precise.')
       const aMsg = await routeMessage(content, activeModel, activeChat.messages, rolePrompt)
+
       setChats(prev=>{
         const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
         const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
         saveChats(next)
         return next
       })
+
+      const replyText = String(aMsg.content || '')
+      setLastReply(replyText)
+      if (autoSpeak && replyText) { try { await speak(replyText, 'en_GB-jenny_dioco-medium.onnx') } catch {} }
       inputRef.current?.focus()
     } catch (e) {
       const errMsg = { role:'assistant', content: 'Error: ' + e.message }
@@ -197,25 +260,47 @@ export default function App(){
     }
   }
 
-  const onSelectModel = async (name) => {
-    setModelBusy(true)
-    try { await selectModel(name); const r=await listModels(); setModels(r.models||[]); setActiveModel(r.active||name) }
-    catch(e){ alert('Model switch failed: '+e.message) }
-    finally{ setModelBusy(false) }
-  }
-  const onRefreshModels = async () => {
-    setModelBusy(true)
-    try { await refreshModels(); const r=await listModels(); setModels(r.models||[]); setActiveModel(r.active||'') }
-    catch(e){ alert('Refresh failed: '+e.message) }
-    finally{ setModelBusy(false) }
+  const send = async () => { if (!input.trim()) return; await sendFromText(input) }
+
+  // Mic transcript handler
+  const handleTranscript = async (text) => {
+    const t = (text || '').trim()
+    if (!t) return
+    if (autoSendFromMic) {
+      setInput(t)
+      await sendFromText(t)
+    } else {
+      setInput(t) // just fill the box
+    }
   }
 
-  const saveRole = () => {
-    setChats(prev=>{
-      const next = prev.map(c => c.id===activeId ? { ...c, role: roleText } : c)
-      saveChats(next)
-      return next
-    })
+  // model handlers (ensure defined to avoid UI crashes)
+  const onSelectModel = async (name) => {
+    setModelBusy(true)
+    try {
+      await selectModel(name)
+      const r = await listModels()
+      setModels(r.models || [])
+      setActiveModel(r.active || name)
+    } catch (e) {
+      alert('Model switch failed: ' + e.message)
+    } finally {
+      setModelBusy(false)
+    }
+  }
+
+  const onRefreshModels = async () => {
+    setModelBusy(true)
+    try {
+      await refreshModels()
+      const r = await listModels()
+      setModels(r.models || [])
+      setActiveModel(r.active || '')
+    } catch (e) {
+      alert('Refresh failed: ' + e.message)
+    } finally {
+      setModelBusy(false)
+    }
   }
 
   // -------- UI --------
@@ -250,6 +335,11 @@ export default function App(){
           placeholder="e.g., Brisk, clear, RP tone…"
           value={roleText} onChange={e=>setRoleText(e.target.value)} onBlur={saveRole}
         />
+
+        <div className="small" style={{paddingLeft:2}}>Speech</div>
+        <div style={{padding:'4px 2px'}}>
+          <TTSControls lastReply={lastReply} onToggleAutoSpeak={setAutoSpeak} />
+        </div>
 
         <div className="small" style={{paddingLeft:2}}>Conversations</div>
         <div className="convlist">
@@ -339,6 +429,7 @@ export default function App(){
               onChange={e=>setInput(e.target.value)}
               onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send() } }}
             />
+            <Mic onTranscript={handleTranscript} />
             <button className="button" onClick={send} disabled={!input.trim()}>Send</button>
           </div>
         </div>

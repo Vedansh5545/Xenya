@@ -1,13 +1,25 @@
-// Xenya — Phase 1 backend (improved URL summary + research-from-URL + acronym expansion)
+// Xenya — Phase 1 backend (chat + research + summary + RSS + memory + TTS + STT)
 import express from 'express'
 import cors from 'cors'
 import fs from 'fs'
+import fsp from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import * as cheerio from 'cheerio'
 import Parser from 'rss-parser'
 import { JSDOM } from 'jsdom'
 import { Readability } from '@mozilla/readability'
+
+// STT deps
+import multer from 'multer'
+import os from 'os'
+import ffmpeg from 'fluent-ffmpeg'
+import ffmpegStatic from 'ffmpeg-static'
+import { spawn } from 'node:child_process'
+ffmpeg.setFfmpegPath(ffmpegStatic)
+
+// TTS
+import { synthesizeWithPiper } from './tts.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -88,7 +100,6 @@ async function extractReadable(url){
   const reader = new Readability(dom.window.document)
   const article = reader.parse()
 
-  // Primary: Readability
   if(article?.textContent?.trim()){
     return {
       title: (article.title || dom.window.document.title || url).trim(),
@@ -96,7 +107,6 @@ async function extractReadable(url){
     }
   }
 
-  // Fallback: meta + first paragraphs
   const $ = cheerio.load(html)
   const { title: mTitle, desc } = collectMeta($)
   const paras = $('p').slice(0,6).map((_,el)=>$(el).text()).get().join(' ')
@@ -104,7 +114,7 @@ async function extractReadable(url){
 
   return {
     title: (mTitle || $('title').first().text() || url).trim(),
-    textContent: text // may be short; we will still try to summarize
+    textContent: text
   }
 }
 
@@ -149,10 +159,7 @@ function expandAcronyms(q){
   return t
 }
 function enrichTopic(q){
-  // add synonyms for CV pose estimation if relevant
-  if (/pose\s+(estimation|detection)/i.test(q)) {
-    q += ' human pose keypoints skeleton COCO MPII'
-  }
+  if (/pose\s+(estimation|detection)/i.test(q)) q += ' human pose keypoints skeleton COCO MPII'
   return q
 }
 async function deriveTopicFromUrl(u){
@@ -167,9 +174,69 @@ async function deriveTopicFromUrl(u){
   }
 }
 
+// ===================== TTS =====================
+app.post('/api/tts', express.json(), async (req, res) => {
+  try {
+    const { text, voice } = req.body || {}
+    if (!text || !text.trim()) return res.status(400).json({ error: 'No text' })
+    const wav = await synthesizeWithPiper({ text: text.trim(), voice })
+    res.setHeader('Content-Type', 'audio/wav')
+    res.send(wav)
+  } catch (e) {
+    console.error('[TTS]', e)
+    res.status(500).json({ error: 'TTS failed' })
+  }
+})
+
+// ===================== STT (offline via Python Vosk) =====================
+const UPLOADS_DIR = path.join(__dirname, 'uploads')
+fs.existsSync(UPLOADS_DIR) || fs.mkdirSync(UPLOADS_DIR, { recursive: true })
+const upload = multer({ dest: UPLOADS_DIR })
+
+async function webmToWavMono16k(inPath){
+  const outPath = path.join(os.tmpdir(), `xenya_${Date.now()}.wav`)
+  await new Promise((resolve, reject)=>{
+    ffmpeg(inPath)
+      .audioChannels(1)
+      .audioFrequency(16000)
+      .format('wav')
+      .output(outPath)
+      .on('end', resolve)
+      .on('error', reject)
+      .run()
+  })
+  return outPath
+}
+
+app.post('/api/stt', upload.single('audio'), async (req, res) => {
+  const f = req.file
+  if (!f) return res.status(400).json({ error: 'No audio' })
+  try {
+    const wavPath = await webmToWavMono16k(f.path)
+    const pyPath = path.join(__dirname, 'stt_py.py')
+    const pyBin = process.env.VENV_PY || path.join(process.cwd(), '..', '.venv', 'bin', 'python')
+
+    const py = spawn(pyBin, [pyPath])
+    const chunks = []
+    fs.createReadStream(wavPath).pipe(py.stdin)
+    py.stdout.on('data', d => chunks.push(d))
+    py.on('close', () => {
+      let out = {}
+      try { out = JSON.parse(Buffer.concat(chunks).toString() || '{}') } catch {}
+      res.json({ text: (out.text || '').trim() })
+      fs.promises.unlink(wavPath).catch(()=>{})
+      fs.promises.unlink(f.path).catch(()=>{})
+    })
+  } catch (e) {
+    console.error('[STT]', e)
+    res.status(500).json({ error: 'STT failed' })
+  }
+})
+// ================= End STT =====================
+
 // ================= Routes =================
 
-// Model manager / health (unchanged)
+// Model manager / health
 app.get('/api/models', async (_req,res)=>{ res.json({ ok:true, active:ACTIVE_MODEL, models: await syncModels() }) })
 app.post('/api/models/select', async (req,res)=>{
   const name=String(req.body?.name||'').trim(); if(!name) return res.status(400).json({ok:false,error:'name required'})
@@ -205,7 +272,7 @@ app.get('/api/search', async (req,res)=>{ try{
   res.json({ ok:true, hits })
 }catch(err){ res.status(500).json({ ok:false, error:String(err) }) } })
 
-// Summary — now accepts thin pages by summarizing metadata if needed
+// Summary
 app.get('/api/summary', async (req,res)=>{ try{
   const url=String(req.query.url||''); const model=String(req.query.model||'')||ACTIVE_MODEL
   if(!isHttpUrl(url)) return res.status(400).json({ ok:false, error:'Valid http(s) url required' })
@@ -232,7 +299,7 @@ app.get('/api/rss', async (req,res)=>{ try{
   res.json({ ok:true, feeds:results })
 }catch(err){ res.status(500).json({ ok:false, error:String(err) }) } })
 
-// Research — handles URLs, expands acronyms, and builds better queries
+// Research
 app.get('/api/research', async (req,res)=>{ try{
   let q=String(req.query.q||'').slice(0,400); const model=String(req.query.model||'')||ACTIVE_MODEL
   if(!q) return res.status(400).json({ ok:false, error:'q required' })
@@ -245,7 +312,6 @@ app.get('/api/research', async (req,res)=>{ try{
 
   q = enrichTopic(expandAcronyms(q))
 
-  // Gather sources
   const queries = uniqBy([
     q,
     q.replace(/\s+/g,' ').trim(),
@@ -253,7 +319,6 @@ app.get('/api/research', async (req,res)=>{ try{
     /pose\s+(estimation|detection)/i.test(q) ? `${q} keypoints skeleton` : null
   ].filter(Boolean), x=>x)
 
-  // Merge hits from multiple queries
   let hits=[]
   for(const qq of queries){
     const h=await resilientSearch(qq,5)
@@ -262,10 +327,8 @@ app.get('/api/research', async (req,res)=>{ try{
   }
   hits = hits.slice(0,7)
 
-  // Wikipedia (best-effort)
   const wiki = await wikipediaSummary(q)
 
-  // Snippets
   const snippets = await Promise.all(hits.map(async h=>{ try{
     const html=await (await fetchWithTimeout(h.url,{headers:UA_HEADERS},10000)).text()
     const $=cheerio.load(html)
@@ -273,7 +336,6 @@ app.get('/api/research', async (req,res)=>{ try{
     return { ...h, snippet: trimText(meta, 320) }
   }catch{ return { ...h, snippet:'' } }}))
 
-  // Build context
   const urlSource = fromUrl ? `S0: Original link — ${fromUrl.topic} (source: https://${fromUrl.host})` : null
   const context = [
     urlSource,
@@ -306,8 +368,18 @@ ${trimText(context, 12000)}`
   res.json({ ok:true, answer, sources: sourceList, model })
 }catch(err){ res.status(500).json({ ok:false, error:String(err) }) } })
 
+// Root
 app.get('/', (_req,res)=>{ res.type('text/plain').send(`Xenya server up
 Active model: ${ACTIVE_MODEL}
-Endpoints: /api/models, /api/models/select, /api/models/refresh, /api/health, /api/chat, /api/memory, /api/search, /api/summary?url=&model=, /api/rss, /api/research?q=&model=`) })
+Endpoints:
+  /api/models, /api/models/select, /api/models/refresh, /api/health
+  /api/chat, /api/memory
+  /api/search, /api/summary?url=&model=, /api/rss, /api/research?q=&model=
+  /api/tts (POST JSON {text, voice})
+  /api/stt (POST multipart form-data: audio=<webm>)`) })
 
-app.listen(PORT, ()=>{ console.log(`✅ Xenya server listening on http://localhost:${PORT}`); console.log(`↪  Ollama at ${OLLAMA_URL} (active: ${ACTIVE_MODEL})`) })
+// --- Listen!
+app.listen(PORT, ()=>{ 
+  console.log(`✅ Xenya server listening on http://localhost:${PORT}`) 
+  console.log(`↪  Ollama at ${OLLAMA_URL} (active: ${ACTIVE_MODEL})`) 
+})
