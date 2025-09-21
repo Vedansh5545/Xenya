@@ -1,3 +1,4 @@
+// client/src/App.jsx
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './theme.css'
 import Notes from './components/Notes.jsx'
@@ -5,9 +6,21 @@ import MarkdownMessage from './components/MarkdownMessage.jsx'
 import { chat, research, summarizeUrl, rss, listModels, selectModel, refreshModels } from './lib/api'
 import TTSControls from './components/TTSControls.jsx'
 import { speak } from './lib/tts/speak'
-import Mic from './components/Mic.jsx'
+import Logo from './components/Logo.jsx'
+import ChatBox from './components/ChatBox.jsx'   // ← compact composer (Talk + Send)
 
-// ---------- Helpers ----------
+/* ---------- Tone & Microcopy ---------- */
+const TONE = {
+  motto: "Consider it sorted.",
+  error: (hint) => `Didn't catch that${hint ? ` — ${hint}` : ""}. One more go?`,
+  done: "All set."
+}
+const COPY = {
+  emptyChat: `${TONE.motto} Start with a link, /research <topic>, or just ask.`,
+  loading: "Thinking…"
+}
+
+/* ---------- Helpers ---------- */
 const LS_KEY = 'xenya.chats.v1'
 const loadChats = () => { try { return JSON.parse(localStorage.getItem(LS_KEY)) || [] } catch { return [] } }
 const saveChats = (d) => localStorage.setItem(LS_KEY, JSON.stringify(d))
@@ -33,20 +46,67 @@ const makeId = (taken = new Set()) => {
   return id
 }
 
-// Router: /research → research, URL → summary, news → rss, else → chat
+/* ---------- Query cleaner + citation filter for /research ---------- */
+const STOP = new Set([
+  "a","an","the","and","or","but","if","then","so","to","for","of","in","on","with",
+  "how","what","why","when","where","who","whom","which","can","could","should",
+  "is","are","was","were","be","being","been","do","does","did","have","has","had",
+  "there","any","about","tell","me","please","i","you","we","they"
+])
+
+const cleanQuery = (q) =>
+  q.toLowerCase()
+   .replace(/[^\p{L}\p{N}\s-]/gu," ")
+   .split(/\s+/)
+   .filter(w => w && !STOP.has(w))
+   .slice(0, 12)
+   .join(" ")
+
+const BAD_DOMAIN = /(merriam|dictionary|vocabulary|collinsdictionary|urbandictionary)\./i
+function filterCitations(cites = []) {
+  const seen = new Set()
+  const good = []
+  for (const c of cites) {
+    try {
+      const u = new URL(c.url)
+      const host = u.hostname.replace(/^www\./, "")
+      if (BAD_DOMAIN.test(host)) continue
+      if (seen.has(host)) continue
+      seen.add(host)
+      good.push({ title: c.title || host, url: c.url })
+    } catch { /* ignore invalid URLs */ }
+  }
+  return good
+}
+
+/* ---------- Router ---------- */
 async function routeMessage(content, model, history, rolePrompt){
   const t = content.trim()
 
   if (t.startsWith('/research ')) {
-    const q0 = t.slice(10).trim()
-    const r = await research(q0, model)
-    return { role:'assistant', content: r.answer || '(no answer)' }
+    const raw = t.slice(10).trim()
+    const q0  = cleanQuery(raw) || raw
+    const r   = await research(q0, model)
+    const summary   = r?.answer || r?.summary || '(no answer)'
+    const citations = filterCitations(r?.citations || r?.sources || r?.links || [])
+    return {
+      role:'assistant',
+      type:'report',
+      reportTitle:`Research Summary: ${raw}`,
+      content: summary,
+      citations,
+      error: r?.error || null
+    }
   }
 
   if (isUrl(t)) {
     try {
       const r = await summarizeUrl(t, model)
-      return { role:'assistant', content: r.summary || '(no summary)' }
+      const summary = r?.summary || r?.bullets?.map(b=>`• ${b}`).join('\n') || '(no summary)'
+      let host = ''
+      try { host = new URL(t).hostname } catch {}
+      const cit = [{ url: t, title: r?.title || host }]
+      return { role:'assistant', type:'report', reportTitle:`URL Summary: ${host || 'Link'}`, content: summary, citations: cit }
     } catch (e) {
       return { role:'assistant', content: `Couldn’t summarize that page (${e.message}). Want me to research it instead? Try: /research ${t}` }
     }
@@ -55,17 +115,69 @@ async function routeMessage(content, model, history, rolePrompt){
   if (wantsNews(t)) {
     const r = await rss()
     const items = (r.feeds||[]).flatMap(f =>
-      (f.items||[]).slice(0,8).map(i => `- [${i.title}](${i.link})`)
+      (f.items||[]).slice(0,8).map(i => ({ title:i.title, url:i.link, source:f.title||f.id||'news', ago:i.ago||'' }))
     )
-    const txt = items.join('\n') || '(no headlines)'
-    return { role:'assistant', content: `**Today’s headlines**\n\n${txt}` }
+    const txt = items.map(i => `- [${i.title}](${i.url})`).join('\n') || '(no headlines)'
+    return { role:'assistant', type:'dispatch', content: `**Today’s headlines**\n\n${txt}`, items }
   }
 
   const resp = await chat({ messages:[...history, {role:'user',content:t}], system: rolePrompt, model })
   return { role:'assistant', content: resp.reply ?? resp?.message?.content ?? '(no reply)' }
 }
 
-// ---------- App ----------
+/* ---------- Inline cards ---------- */
+function ReportCard({ title, body, cites=[], err }){
+  const [open, setOpen] = useState(false)
+  const shown = open ? cites : (cites || []).slice(0, 6)
+  const more  = Math.max(0, (cites || []).length - shown.length)
+  return (
+    <div className="report-card materialize">
+      <div className="report-head">🔷 {title}</div>
+      {err && <div className="small" style={{marginTop:4, color:"var(--muted)"}}>
+        Online sources were flaky; provided a concise synthesis{cites.length ? ' with citations.' : '.'}
+      </div>}
+      <div className="report-body">
+        {typeof body === 'string' ? <MarkdownMessage text={body}/> : body}
+      </div>
+      {!!shown.length && (
+        <div className="cites">
+          {shown.map((c,i)=>{
+            let href = c?.url || '#'
+            let label = c?.title
+            try{ if (!label) label = new URL(href).hostname }catch{}
+            const ico = (()=>{ try{ return `${new URL(href).origin}/favicon.ico` }catch{ return '' } })()
+            return (
+              <a key={i} className="pill" href={href} target="_blank" rel="noreferrer noopener">
+                {ico && <img alt="" src={ico} />}
+                <span className="pill-text">{label || 'source'}</span>
+              </a>
+            )
+          })}
+          {more > 0 && (
+            <button className="pill" onClick={()=>setOpen(true)} title="Show more sources">+{more} more</button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Dispatch({ items=[] }){
+  return (
+    <div className="dispatch materialize">
+      <h4>Dispatch</h4>
+      {items.map((it,i)=>(
+        <div key={i} className="item">
+          <span className="src">{it.source || 'news'}</span>
+          <a className="ttl" href={it.url} target="_blank" rel="noreferrer noopener">{it.title}</a>
+          <span className="ago">{it.ago || ''}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/* ---------- App ---------- */
 export default function App(){
   // models
   const [models, setModels] = useState([])
@@ -75,14 +187,19 @@ export default function App(){
   // chats
   const [chats, setChats] = useState(loadChats())
   const [activeId, setActiveId] = useState(() => chats[0]?.id || uid())
-  const [input, setInput] = useState('')
+  const [lastCreatedId, setLastCreatedId] = useState(null)
 
-  // rename / delete modal state
+  // input + send
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [justDone, setJustDone] = useState(false)
+
+  // rename / delete
   const [editingId, setEditingId] = useState(null)
   const [editingText, setEditingText] = useState('')
   const [confirmDeleteId, setConfirmDeleteId] = useState(null)
 
-  // Role prompt (draft-first for plans)
+  // Role prompt
   const [roleText, setRoleText] = useState(
     "You are Xenya — The Digital Attaché. Be brisk, clear, precise. " +
     "Identity: local assistant using a user-selected Ollama model. Do not claim to be OpenAI/GPT-3. " +
@@ -90,13 +207,16 @@ export default function App(){
     "When the user requests a plan/schedule (e.g., timetable, study plan) and details are missing, produce a concise, sensible draft with clear assumptions, then ask for 2–3 quick tweaks."
   )
 
-  // TTS / STT state
+  // TTS / STT
   const [lastReply, setLastReply] = useState('')
   const [autoSpeak, setAutoSpeak] = useState(true)
-  const [autoSendFromMic] = useState(true) // auto-send transcript after STT
+  const [autoSendFromMic] = useState(true)
+
+  // UI status for ChatBox waves
+  const [uiStatus, setUiStatus] = useState('idle')
 
   const endRef = useRef(null)
-  const inputRef = useRef(null)
+  const logoRef = useRef(null)
 
   const activeChat = useMemo(
     () => chats.find(c=>c.id===activeId) || { id:activeId, title:'New chat', messages:[], role: roleText },
@@ -108,7 +228,7 @@ export default function App(){
     try { const r = await listModels(); setModels(r.models||[]); setActiveModel(r.active||'') } catch(e){ console.error(e) }
   })() },[])
 
-  // one-time: de-dupe chats loaded from LS and fix activeId if necessary + ensure active chat exists
+  // one-time: de-dupe chats, ensure one exists
   useEffect(() => {
     let changed = false
     const seen = new Set()
@@ -131,28 +251,31 @@ export default function App(){
 
     if (changed) { setChats(list); saveChats(list) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])  // run once
+  }, [])
 
-  // guard: if activeId ever points to a non-existent chat
+  // guard
   useEffect(() => {
-    if (chats.length && !chats.some(c => c.id === activeId)) {
-      setActiveId(chats[0].id)
-    }
+    if (chats.length && !chats.some(c => c.id === activeId)) setActiveId(chats[0].id)
   }, [chats, activeId])
 
   // load role when switching chats
   useEffect(()=>{ setRoleText(activeChat.role || roleText) },[activeId])
 
   // autoscroll
-  useEffect(()=>{ endRef.current?.scrollIntoView({behavior:'smooth'}) },[activeChat.messages])
+  useEffect(()=>{ endRef.current?.scrollIntoView({behavior:'smooth'}) },[activeChat.messages, busy])
 
-  // create a new chat immediately (prevents race/dup keys)
+  // create a new chat
   const newChat = ()=>{
     const taken = new Set(chats.map(c => c.id))
     const id = makeId(taken)
     const chat = { id, title:'New chat', messages:[], role: roleText }
     setChats(prev=>{ const next=[chat, ...prev]; saveChats(next); return next })
     setActiveId(id)
+    setLastCreatedId(id)
+    requestAnimationFrame(()=>{
+      const el = document.querySelector(`.conv[data-id="${id}"]`)
+      if (el) el.classList.add('appear')
+    })
   }
 
   const titleFromFirstUser = (chat) => {
@@ -160,7 +283,7 @@ export default function App(){
     return first.length>28 ? first.slice(0,28)+'…' : first
   }
 
-  // -------- small toast --------
+  // toast
   function toast(txt){
     const t = document.createElement('div')
     t.className = 'toast'
@@ -170,9 +293,8 @@ export default function App(){
     setTimeout(()=>{ t.classList.remove('show'); setTimeout(()=>t.remove(),300) }, 1200)
   }
 
-  // -------- delete / rename handlers --------
+  // delete / rename
   const requestDelete = (id) => { setConfirmDeleteId(id) }
-
   const doDelete = (id) => {
     setChats(prev=>{
       const filtered = prev.filter(x=>x.id!==id)
@@ -192,7 +314,6 @@ export default function App(){
     setConfirmDeleteId(null)
     toast('Conversation deleted')
   }
-
   const startRename = (id) => {
     const c = chats.find(x=>x.id===id)
     setEditingId(id)
@@ -207,22 +328,19 @@ export default function App(){
       return next
     })
     setEditingId(null); setEditingText('')
-    toast('Renamed')
   }
   const cancelRename = () => { setEditingId(null); setEditingText('') }
 
-  // Save role/system prompt into the active chat (fixes onBlur crash)
+  // Save role
   const saveRole = () => {
     setChats(prev=>{
-      const next = prev.map(c =>
-        c.id === activeId ? { ...c, role: roleText } : c
-      )
+      const next = prev.map(c => c.id === activeId ? { ...c, role: roleText } : c)
       saveChats(next)
       return next
     })
   }
 
-  // ======= SEND helpers so Mic can reuse =======
+  /* ======= SEND helpers ======= */
   const sendFromText = async (text) => {
     const content = (text || '').trim()
     if (!content) return
@@ -235,6 +353,11 @@ export default function App(){
       return next
     })
 
+    // logo flourish + status
+    try { logoRef?.current?.play?.() } catch {}
+    setUiStatus('thinking')
+
+    setBusy(true); setJustDone(false)
     try {
       const rolePrompt = (activeChat.role?.trim() || roleText || 'You are Xenya — brisk, clear, precise.')
       const aMsg = await routeMessage(content, activeModel, activeChat.messages, rolePrompt)
@@ -248,8 +371,12 @@ export default function App(){
 
       const replyText = String(aMsg.content || '')
       setLastReply(replyText)
-      if (autoSpeak && replyText) { try { await speak(replyText, 'en_GB-jenny_dioco-medium.onnx') } catch {} }
-      inputRef.current?.focus()
+      if (autoSpeak && replyText) {
+        try {
+          setUiStatus('speaking')
+          await speak(replyText, 'en_GB-jenny_dioco-medium.onnx')
+        } catch {}
+      }
     } catch (e) {
       const errMsg = { role:'assistant', content: 'Error: ' + e.message }
       setChats(prev=>{
@@ -257,24 +384,32 @@ export default function App(){
         saveChats(next)
         return next
       })
+    } finally {
+      setBusy(false); setJustDone(true)
+      setTimeout(()=>setJustDone(false), 350)
+      setUiStatus('idle')
     }
   }
 
   const send = async () => { if (!input.trim()) return; await sendFromText(input) }
 
-  // Mic transcript handler
+  // Mic transcript + status
   const handleTranscript = async (text) => {
     const t = (text || '').trim()
-    if (!t) return
+    if (!t) { setUiStatus('idle'); return }
     if (autoSendFromMic) {
       setInput(t)
       await sendFromText(t)
     } else {
-      setInput(t) // just fill the box
+      setInput(t)
     }
   }
+  const handleMicStatus = (s) => {
+    if (s === 'listening' || s === 'transcribing') setUiStatus(s)
+    else if (s === 'idle' && !busy) setUiStatus('idle')
+  }
 
-  // model handlers (ensure defined to avoid UI crashes)
+  // model handlers
   const onSelectModel = async (name) => {
     setModelBusy(true)
     try {
@@ -282,13 +417,8 @@ export default function App(){
       const r = await listModels()
       setModels(r.models || [])
       setActiveModel(r.active || name)
-    } catch (e) {
-      alert('Model switch failed: ' + e.message)
-    } finally {
-      setModelBusy(false)
-    }
+    } catch (e) { alert('Model switch failed: ' + e.message) } finally { setModelBusy(false) }
   }
-
   const onRefreshModels = async () => {
     setModelBusy(true)
     try {
@@ -296,21 +426,19 @@ export default function App(){
       const r = await listModels()
       setModels(r.models || [])
       setActiveModel(r.active || '')
-    } catch (e) {
-      alert('Refresh failed: ' + e.message)
-    } finally {
-      setModelBusy(false)
-    }
+    } catch (e) { alert('Refresh failed: ' + e.message) } finally { setModelBusy(false) }
   }
 
-  // -------- UI --------
+  /* -------- UI -------- */
   return (
     <div className="shell">
       <Notes/>
 
       {/* Sidebar */}
       <aside className="sidebar">
-        <div className="brand"><h1>Xenya</h1></div>
+        <div className="brand">
+          <Logo ref={logoRef} size={40} showWord />
+        </div>
 
         <button className="newchat" onClick={newChat} title="New chat">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
@@ -344,7 +472,12 @@ export default function App(){
         <div className="small" style={{paddingLeft:2}}>Conversations</div>
         <div className="convlist">
           {chats.map(c=>(
-            <div key={c.id} className={'conv '+(c.id===activeId?'active':'')} onClick={()=>setActiveId(c.id)}>
+            <div
+              key={c.id}
+              data-id={c.id}
+              className={'conv '+(c.id===activeId?'active':'')+(c.id===lastCreatedId?' appear':'')}
+              onClick={()=>setActiveId(c.id)}
+            >
               <div className="conv-main">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
                   <path d="M4 5h16v12H7l-3 3V5z" stroke="currentColor" strokeWidth="2"/>
@@ -383,56 +516,70 @@ export default function App(){
       {/* Main */}
       <main className="main">
         <div className="header">
-          <div><strong>Chat</strong> <span className="badge">Phase 1 • Pragmatic Precision</span></div>
+          <div>
+            <strong>Chat</strong>
+            <span className="badge"> Phase 1 • Pragmatic Precision</span>
+            {activeModel && <span className="badge" style={{marginLeft:8}}>[{activeModel}]</span>}
+          </div>
         </div>
+
+        {/* (Removed the top StatusViz bar) */}
+
+        {/* Loader line when busy */}
+        {busy && <div className="loader-line" style={{position:'sticky', top:0, zIndex:2}} />}
 
         <div className="messages">
           {activeChat.messages.length===0 && (
-            <div className="bubble">
-              <div className="role assistant">Xenya</div>
-              Hi — I’m Xenya. Paste a link for a summary, type <code>/research &lt;topic&gt;</code>, or just ask.
+            <div className="assistant">
+              <div className="bubble materialize">
+                <div className="role assistant">Xenya</div>
+                {COPY.emptyChat}
+              </div>
             </div>
           )}
 
           {activeChat.messages.map((m,i)=>(
             <div key={i} className={m.role}>
-              <div className="bubble">
-                {/* per-message copy: show on assistant messages */}
-                {m.role==='assistant' && (
-                  <div className="bubble-actions">
-                    <button
-                      className="ghost-btn"
-                      title="Copy message"
-                      onClick={async()=>{ try{ await navigator.clipboard.writeText(String(m.content||'')) }catch{} }}
-                    >
-                      Copy
-                    </button>
+              {m.type === 'report' ? (
+                <ReportCard title={m.reportTitle || 'Report'} body={m.content} cites={m.citations || m.cites || []} err={m.error} />
+              ) : m.type === 'dispatch' ? (
+                <Dispatch items={m.items || []} />
+              ) : (
+                <div className="bubble materialize">
+                  {m.role==='assistant' && (
+                    <div className="bubble-actions">
+                      <button
+                        className="ghost-btn"
+                        title="Copy message"
+                        onClick={async()=>{ try{ await navigator.clipboard.writeText(String(m.content||'')) }catch{} }}
+                      >
+                        Copy
+                      </button>
+                    </div>
+                  )}
+                  <div className={'role ' + (m.role==='user'?'user':'assistant')}>
+                    {m.role==='user'?'You':'Xenya'}
                   </div>
-                )}
-                <div className={'role ' + (m.role==='user'?'user':'assistant')}>
-                  {m.role==='user'?'You':'Xenya'}
+                  <MarkdownMessage text={m.content}/>
                 </div>
-                <MarkdownMessage text={m.content}/>
-              </div>
+              )}
             </div>
           ))}
+
           <div ref={endRef}/>
         </div>
 
-        <div className="composerWrap">
-          <div className="composer">
-            <input
-              ref={inputRef}
-              className="input"
-              placeholder="Message Xenya…"
-              value={input}
-              onChange={e=>setInput(e.target.value)}
-              onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send() } }}
-            />
-            <Mic onTranscript={handleTranscript} />
-            <button className="button" onClick={send} disabled={!input.trim()}>Send</button>
-          </div>
-        </div>
+        {/* Compact composer (status/waves rendered inside) */}
+        <ChatBox
+          value={input}
+          onChange={setInput}
+          busy={busy}
+          status={uiStatus}                 // ← drives the waves inside ChatBox
+          onSend={send}
+          onTranscript={handleTranscript}
+          onMicStatus={handleMicStatus}
+          autoFocus
+        />
       </main>
 
       {/* Delete confirmation modal */}
