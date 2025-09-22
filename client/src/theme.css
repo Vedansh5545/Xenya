@@ -737,3 +737,202 @@ body::after{
 @media (max-width: 520px){
   .voice-wave{ right: 156px }
 }
+/* ===== ChatBox (composer) ================================================= */
+.chatbox-wrap{
+  position: sticky;
+  bottom: 18px;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  padding: 0 18px;
+}
+.chatbox{
+  position: relative;
+  width: min(1100px, 92vw);
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 14px 14px 18px;
+  border-radius: 26px;
+  background: linear-gradient(180deg, rgba(12,14,26,.9), rgba(10,12,22,.86));
+  border: 1px solid rgba(157,117,255,.35);
+  box-shadow:
+    0 0 0 1px rgba(132, 98, 255, .1) inset,
+    0 16px 40px rgba(98, 66, 255, .18);
+  backdrop-filter: blur(6px);
+}
+.chatbox.is-busy{ opacity: .98 }
+
+.chatbox-input{
+  position: relative;
+  z-index: 2;
+  height: 46px;
+  border: 0;
+  outline: 0;
+  width: 100%;
+  background: transparent;
+  color: var(--text, #dfe6ff);
+  font-size: 16px;
+}
+.chatbox-input::placeholder{ color: #778; }
+
+.chatbox-actions{
+  display: flex; gap: 10px; align-items: center;
+}
+.cb-btn{
+  border: 0; outline: 0; cursor: pointer;
+  height: 42px; padding: 0 18px;
+  border-radius: 24px;
+  color: #efeaff;
+  background: linear-gradient(180deg,#7d51ff,#6a3dff 70%);
+  box-shadow: 0 10px 24px rgba(122,72,255,.34), 0 0 0 1px rgba(150,100,255,.2) inset;
+}
+.cb-btn:disabled { opacity: .55; cursor: default; }
+
+/* ----- Waves container (inside bar) ----- */
+.cb-waves{
+  position: absolute;
+  left: 18px;
+  right: 170px;        /* space for the buttons */
+  top: 8px;
+  height: 42px;
+  z-index: 1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.cb-waves-svg{ width: 100%; height: 100%; }
+
+.cb-fog{
+  fill: radial-gradient(circle at 50% 50%, #ffdf6e 0%, transparent 70%); /* overridden by fill below */
+  fill: #ffd24d;
+  opacity: .10;
+  filter: blur(6px);
+}
+
+.cb-wave{
+  fill: none;
+  stroke-width: 2;
+  filter: drop-shadow(0 0 8px rgba(120,80,255,.35));
+}
+.cb-wave.wave-a{ stroke: #8b5cff; }
+.cb-wave.wave-b{ stroke: #00e0ff; opacity: .9; }
+.cb-wave.wave-c{ stroke: #ff53d4; opacity: .85; }
+
+/* Status tints & persistent glow */
+.chatbox.typing .cb-wave      { filter: drop-shadow(0 0 7px rgba(0,224,255,.22)); }
+.chatbox.listening .cb-wave   { filter: drop-shadow(0 0 10px rgba(0,224,255,.35)); }
+.chatbox.transcribing .cb-wave{ filter: drop-shadow(0 0 10px rgba(255, 83,212,.32)); }
+.chatbox.thinking .cb-wave    { filter: drop-shadow(0 0 8px rgba(139,92,255,.28)); }
+.chatbox.speaking .cb-wave    { filter: drop-shadow(0 0 12px rgba(255, 83,212,.38)); }
+.chatbox.idle .cb-wave        { opacity: .75; }
+
+/* Tight layout on small screens */
+@media (max-width: 720px){
+  .chatbox{ grid-template-columns: 1fr auto; padding-right: 10px; }
+  .cb-waves{ right: 150px; }
+}
+/* Hide waves by default; only show for these states */
+.cb-waves{ opacity: 0; transition: opacity .25s ease }
+.chatbox.listening .cb-waves,
+.chatbox.transcribing .cb-waves,
+.chatbox.thinking .cb-waves,
+.chatbox.speaking .cb-waves { opacity: 1; }
+/* ===== Stage-wide listening/transcribing/thinking overlay (full chat area) ===== */
+.stage{
+  position: relative;
+  flex: 1;
+  min-height: 280px;
+  display: flex;
+  flex-direction: column;
+}
+.stage .messages{
+  position: relative;
+  z-index: 1;
+  transition: filter .25s var(--ease), opacity .25s var(--ease);
+}
+.stage .messages.is-covered{
+  filter: blur(4px);
+  opacity: .08;
+  pointer-events: none;
+}
+
+.stage-waves{
+  position: absolute;
+  inset: 0 0 86px 0;          /* leave space for the bottom composer */
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .25s var(--ease);
+  background: radial-gradient(1200px 600px at 50% 100%, rgba(122,62,255,.10), transparent 60%),
+              radial-gradient(1200px 600px at 50%   0%, rgba(0,229,255,.06), transparent 60%);
+  backdrop-filter: blur(2px) saturate(1.02);
+}
+.stage-waves.show{ opacity: 1; }
+
+.stage-waves-svg{ width: 100%; height: 100%; }
+
+/* Fog + three layered strokes (match chatbox palette) */
+.stage-fog{
+  fill: #ffd24d;     /* warm hint; tinted by state below */
+  opacity: .08;
+  filter: blur(10px);
+}
+.stage-wave{
+  fill: none;
+  stroke-width: 3;
+  filter: drop-shadow(0 0 10px rgba(120,80,255,.28));
+}
+.stage-wave.wave-a{ stroke: #8b5cff; }
+.stage-wave.wave-b{ stroke: #00e0ff; opacity: .95; }
+.stage-wave.wave-c{ stroke: #ff53d4; opacity: .85; }
+
+/* State tints */
+.stage-waves.listening .stage-wave { filter: drop-shadow(0 0 12px rgba(0,224,255,.35)); }
+.stage-waves.transcribing .stage-wave { filter: drop-shadow(0 0 12px rgba(255,83,212,.34)); }
+.stage-waves.thinking .stage-wave { filter: drop-shadow(0 0 10px rgba(139,92,255,.28)); }
+.stage-waves.speaking .stage-wave { filter: drop-shadow(0 0 14px rgba(255,83,212,.40)); }
+
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce){
+  .stage .messages.is-covered{ filter: none; opacity: .20; }
+  .stage-waves{ background: linear-gradient(180deg, rgba(122,62,255,.10), rgba(0,229,255,.08)); }
+}
+/* ===== ChatBox: full-bar Listening visuals ===== */
+.listen-glow{
+  position:absolute; inset:-20% -10%;
+  background:
+    radial-gradient(120% 140% at 15% 50%, rgba(0,229,255,.20), transparent 60%),
+    radial-gradient(120% 140% at 85% 50%, rgba(255,83,212,.14), transparent 60%),
+    linear-gradient(90deg, rgba(139,92,255,.10), rgba(0,229,255,.10), rgba(139,92,255,.10));
+  filter: blur(12px) saturate(1.05);
+  animation: listen-breathe 3.4s ease-in-out infinite;
+}
+@keyframes listen-breathe{
+  0%,100%{ transform: scale(1); opacity:.85 }
+  50%    { transform: scale(1.03); opacity:1 }
+}
+
+.listen-scan{
+  position:absolute; top:-8%; bottom:-8%; width:28%;
+  background: linear-gradient(90deg,
+    rgba(0,0,0,0) 0%,
+    rgba(0,229,255,.0) 2%,
+    rgba(0,229,255,.22) 30%,
+    rgba(255,210,77,.28) 50%,
+    rgba(255,83,212,.22) 70%,
+    rgba(0,229,255,.0) 98%,
+    rgba(0,0,0,0) 100%);
+  filter: blur(2px) saturate(1.1);
+  animation: listen-scan 2.6s linear infinite;
+  mix-blend-mode: screen;
+}
+@keyframes listen-scan{
+  from { transform: translateX(-40%) }
+  to   { transform: translateX(140%) }
+}
+
+/* Optional: a subtle inset outline while listening */
+.chatbox.listening{
+  box-shadow: inset 0 0 0 1px rgba(0,229,255,.18), 0 0 24px rgba(122,62,255,.18);
+}

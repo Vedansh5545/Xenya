@@ -7,7 +7,7 @@ import { chat, research, summarizeUrl, rss, listModels, selectModel, refreshMode
 import TTSControls from './components/TTSControls.jsx'
 import { speak } from './lib/tts/speak'
 import Logo from './components/Logo.jsx'
-import ChatBox from './components/ChatBox.jsx'   // ← compact composer (Talk + Send)
+import ChatBox from './components/ChatBox.jsx'   // compact composer (Talk + Send)
 
 /* ---------- Tone & Microcopy ---------- */
 const TONE = {
@@ -74,9 +74,23 @@ function filterCitations(cites = []) {
       if (seen.has(host)) continue
       seen.add(host)
       good.push({ title: c.title || host, url: c.url })
-    } catch { /* ignore invalid URLs */ }
+    } catch {}
   }
   return good
+}
+
+/* ---------- Mic status normalizer ---------- */
+function normalizeMicStatus(s) {
+  const v = String(s || '')
+    .toLowerCase()
+    .replace(/[.…]/g, '')
+    .trim()
+  if (v.startsWith('listen') || v.startsWith('record')) return 'listening'
+  if (v.startsWith('transcrib') || v.includes('stt') || v.includes('speech to text')) return 'transcribing'
+  if (v.startsWith('think') || v.startsWith('process') || v === 'loading') return 'thinking'
+  if (v.startsWith('speak') || v.startsWith('talk')) return 'speaking'
+  if (v === 'ready' || v === 'idle' || v.startsWith('stop')) return 'idle'
+  return 'idle'
 }
 
 /* ---------- Router ---------- */
@@ -353,9 +367,8 @@ export default function App(){
       return next
     })
 
-    // logo flourish + status
+    // logo flourish (no waves for typed messages)
     try { logoRef?.current?.play?.() } catch {}
-    setUiStatus('thinking')
 
     setBusy(true); setJustDone(false)
     try {
@@ -369,13 +382,13 @@ export default function App(){
         return next
       })
 
+      // Stop Talk visualization as soon as reply is printed
+      setUiStatus('idle')
+
       const replyText = String(aMsg.content || '')
       setLastReply(replyText)
       if (autoSpeak && replyText) {
-        try {
-          setUiStatus('speaking')
-          await speak(replyText, 'en_GB-jenny_dioco-medium.onnx')
-        } catch {}
+        try { await speak(replyText, 'en_GB-jenny_dioco-medium.onnx') } catch {}
       }
     } catch (e) {
       const errMsg = { role:'assistant', content: 'Error: ' + e.message }
@@ -384,14 +397,15 @@ export default function App(){
         saveChats(next)
         return next
       })
+      setUiStatus('idle')
     } finally {
       setBusy(false); setJustDone(true)
       setTimeout(()=>setJustDone(false), 350)
-      setUiStatus('idle')
     }
   }
 
   const send = async () => { if (!input.trim()) return; await sendFromText(input) }
+
 
   // Mic transcript + status
   const handleTranscript = async (text) => {
@@ -399,14 +413,23 @@ export default function App(){
     if (!t) { setUiStatus('idle'); return }
     if (autoSendFromMic) {
       setInput(t)
+      // show transcribing clearly before we swap to thinking
+      setUiStatus('transcribing')
+      await new Promise(r => setTimeout(r, 350))  // give the dots time to be seen
+      setUiStatus('thinking')
       await sendFromText(t)
     } else {
       setInput(t)
     }
   }
+
+
   const handleMicStatus = (s) => {
-    if (s === 'listening' || s === 'transcribing') setUiStatus(s)
-    else if (s === 'idle' && !busy) setUiStatus('idle')
+    const norm = normalizeMicStatus(s)
+    if (norm === 'listening' || norm === 'transcribing' || norm === 'thinking' || norm === 'idle') {
+      setUiStatus(norm)
+    }
+    // do not force idle here; sendFromText will set idle once reply is printed
   }
 
   // model handlers
@@ -523,8 +546,6 @@ export default function App(){
           </div>
         </div>
 
-        {/* (Removed the top StatusViz bar) */}
-
         {/* Loader line when busy */}
         {busy && <div className="loader-line" style={{position:'sticky', top:0, zIndex:2}} />}
 
@@ -569,13 +590,13 @@ export default function App(){
           <div ref={endRef}/>
         </div>
 
-        {/* Compact composer (status/waves rendered inside) */}
+        {/* Compact composer */}
         <ChatBox
           value={input}
           onChange={setInput}
           busy={busy}
-          status={uiStatus}                 // ← drives the waves inside ChatBox
-          onSend={send}
+          status={uiStatus}
+          onSend={(t)=>sendFromText(t)}
           onTranscript={handleTranscript}
           onMicStatus={handleMicStatus}
           autoFocus
