@@ -88,7 +88,7 @@ function hasP1(flags){ return flags.some(f => /^p1$|^priority\s*1$|^urgent$|^imp
 function hasP2(flags){ return flags.some(f => /^p2$|^priority\s*2$|^high$/i.test(f)); }
 
 /* ---------- UI ---------- */
-export default function MiniKanban({ open, onClose }) {
+export default function MiniKanban({ open, onClose, embedded=false }) {
   const [data, setData] = useState(() => load());
 
   // creator controls
@@ -114,7 +114,7 @@ export default function MiniKanban({ open, onClose }) {
 
   // Hide dock (Notes + Productivity) while open
   useEffect(()=>{
-    if(!open) return;
+    if(!open || embedded) return;
     const dock = document.getElementById('x-dock');
     if (dock) dock.classList.add('dock-hidden');
     return ()=>{ if (dock) dock.classList.remove('dock-hidden'); };
@@ -184,7 +184,7 @@ export default function MiniKanban({ open, onClose }) {
     return out;
   }
 
-  if(!open) return null;
+  if(!open && !embedded) return null;
 
   return (
     <>
@@ -193,6 +193,9 @@ export default function MiniKanban({ open, onClose }) {
         .mk-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.45);backdrop-filter:blur(6px);z-index:9998;}
         .mk-card{position:fixed;right:24px;top:96px;width:min(980px, calc(100vw - 48px));background:rgba(18,18,32,0.96);
           border:1px solid rgba(255,255,255,0.08);border-radius:16px;box-shadow:0 12px 36px rgba(0,0,0,0.5);z-index:10060;}
+        .mk-card.mk-embedded{position:static; right:auto; top:auto; width:100%; background:transparent;
+          border:0; box-shadow:none;}
+
         .mk-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,0.06)}
         .mk-title{font-weight:600;opacity:.9}
         .mk-close{background:transparent;border:0;color:#ddd;cursor:pointer}
@@ -229,13 +232,17 @@ export default function MiniKanban({ open, onClose }) {
         .mk-danger{background:rgba(255,0,64,0.14);border:1px solid rgba(255,0,64,0.5);color:#ffd6de;border-radius:8px;padding:6px 10px;cursor:pointer}
       `}</style>
 
-      <div className="mk-overlay" ref={overlayRef} onClick={(e)=>{ if(e.target===overlayRef.current) onClose?.() }} />
+      {!embedded && (
+        <div className="mk-overlay" ref={overlayRef} onClick={(e)=>{ if(e.target===overlayRef.current) onClose?.() }} />
+      )}
 
-      <div className="mk-card" role="dialog" aria-modal="true">
-        <div className="mk-head">
-          <div className="mk-title">Xenya • Kanban (MVP)</div>
-          <button className="mk-close" onClick={onClose} title="Close">✕</button>
-        </div>
+      <div className={embedded ? "mk-card mk-embedded" : "mk-card"} role="dialog" aria-modal={!embedded ? "true" : "false"}>
+        {!embedded && (
+          <div className="mk-head">
+            <div className="mk-title">Xenya • Kanban (MVP)</div>
+            <button className="mk-close" onClick={onClose} title="Close">✕</button>
+          </div>
+        )}
 
         {/* Create new task with colors + flags */}
         <div className="mk-add">

@@ -71,42 +71,34 @@ export default function Notes(){
           </ul>
         </section>
 
-        {/* ===== New: Mini Kanban (MVP) ===== */}
+        {/* ===== Action Dock ===== */}
         <section>
-          <h4>Productivity • Mini Kanban (MVP)</h4>
+          <h4>Action Dock</h4>
           <ul>
-            <li><strong>Open</strong>: Click <em>⚡ Productivity</em> in the Action Dock (top-right). The dock hides while Kanban is open so it never overlaps the editor. <em>Esc</em> closes.</li>
-            <li><strong>Columns</strong>: <code>INBOX</code> → <code>DOING</code> → <code>DONE</code>. Drag cards between columns.</li>
-            <li><strong>Create</strong> (top row):
+            <li>Top-right floating controls: <em>✦ Notes</em> and <em>⚡ Productivity</em>.</li>
+            <li>Use the small circle toggle to <strong>hide/show</strong> the dock. While the Productivity screen is open, the dock auto-hides to prevent overlap; it reappears on close.</li>
+            <li>Open Productivity via UI or type <code>/productivity</code>, <code>/prod</code>, or <code>/kanban</code>.</li>
+            <li>If the dock ever seems missing, ensure the element id is <code>#x-dock</code> and that no external CSS forces <code>display:none</code>.</li>
+          </ul>
+        </section>
+
+        {/* ===== Productivity — Mini Kanban (no calendar info) ===== */}
+        <section>
+          <h4>Productivity • Mini Kanban</h4>
+          <ul>
+            <li><strong>Open</strong>: Click <em>⚡ Productivity</em> in the Dock. <em>Esc</em> closes the Productivity screen.</li>
+            <li><strong>Tiles</strong>: Each tool appears as a tile. You can <strong>drag</strong> to reorder, <strong>minimize</strong> to the dock, <strong>maximize</strong> (▣), and <strong>resize</strong> (widen ⇢ 2 columns; taller ⇢ 2 rows).</li>
+            <li><strong>Layouts</strong>: Use the <em>Layouts ▾</em> button to apply presets that fit the number of tiles (e.g., side-by-side for 2, 2×2 grid for 4, hero 2×2 + singles for 5).</li>
+            <li><strong>Full screen</strong>: Click <em>Full screen</em> in the header to make the Productivity screen occupy the entire viewport for maximum space.</li>
+            <li><strong>Kanban basics</strong>:
               <ul>
-                <li>Type title → press <kbd>Enter</kbd> or click <em>Add</em>.</li>
-                <li>Pick up to <strong>two colors</strong> from 7 presets (Red, Orange, Yellow, Green, Blue, Purple, Gray). Two colors give a 50/50 split border.</li>
-                <li>Fast flags: <strong>P1</strong> (adds Red) and <strong>P2</strong> (adds Orange). You can also add custom flags (e.g., <code>ml</code>, <code>school</code>) — press <kbd>Enter</kbd> or <kbd>,</kbd> to commit.</li>
+                <li>Columns: <code>INBOX</code> → <code>DOING</code> → <code>DONE</code>. Drag cards between columns.</li>
+                <li>Create at the top: type title → <kbd>Enter</kbd> or <em>Add</em>. Choose up to two colors and optional flags (P1/P2 are quick picks).</li>
+                <li>Filter by Flag/Color; Sort by Flag or Color order.</li>
+                <li>Chat shortcuts: <code>/task "Title"</code>, <code>/move "Title" inbox|doing|done</code>, <code>/kanban</code> to open.</li>
+                <li>Data: stored in <code>localStorage["xenya.kanban.v1"]</code>.</li>
               </ul>
             </li>
-            <li><strong>Edit/Delete</strong>: Use the buttons on a card. Editing lets you change title, flags, and colors.</li>
-            <li><strong>Priority mapping</strong>:
-              <ul>
-                <li><span style={{border:'1px solid #ff4d4f', padding:'0 6px', borderRadius:6}}>Red</span> ⇒ <code>p1</code> (Priority 1).</li>
-                <li><span style={{border:'1px solid #ff9800', padding:'0 6px', borderRadius:6}}>Orange</span> ⇒ <code>p2</code> (Priority 2).</li>
-                <li>Choosing Red/Orange auto-adds the corresponding flag; flags can be edited later.</li>
-              </ul>
-            </li>
-            <li><strong>Filter & Sort</strong> (toolbar under Add):
-              <ul>
-                <li>Filter by <em>Flag</em> (P1/P2 or any custom flag) and/or by <em>Color</em>.</li>
-                <li>Sort by <em>Flag</em> (P1 → P2 → others) or by <em>Color order</em>.</li>
-              </ul>
-            </li>
-            <li><strong>Chat shortcuts</strong>:
-              <ul>
-                <li><code>/task "Title"</code> → add to Inbox.</li>
-                <li><code>/move "Title" inbox|doing|done</code> → move between columns.</li>
-                <li><code>/kanban</code> → open the Kanban popup.</li>
-                <li>(For flags/colors, use the popup for now.)</li>
-              </ul>
-            </li>
-            <li><strong>Data</strong>: Stored locally under <code>localStorage["xenya.kanban.v1"]</code>. Legacy single <code>color</code>/<code>flag</code> values are auto-migrated.</li>
           </ul>
         </section>
 
@@ -151,12 +143,10 @@ export default function Notes(){
             <li><code>server/server.js</code>: API for chat/search/summary/rss + <code>/api/tts</code> (Piper) + <code>/api/stt</code> (Vosk).</li>
             <li><code>server/tts.js</code>: Pipes text → Piper → WAV bytes for TTS.</li>
             <li><code>server/stt_py.py</code>: Reads WAV 16k mono from stdin and returns JSON transcript via Vosk.</li>
-            <li><code>server/models/vosk/vosk-model-small-en-us-0.15/</code>: Offline STT model data.</li>
-            <li><code>server/piper/voices/*.onnx</code>: Offline TTS voices.</li>
             <li><code>client/src/components/Mic.jsx</code>: Mic recorder → uploads FormData to <code>/api/stt</code>.</li>
             <li><code>client/src/lib/tts/speak.js</code>: Fetches <code>/api/tts</code> and plays wav.</li>
             <li><code>client/src/components/MiniKanban.jsx</code>: Kanban popup, filters, color/flag logic.</li>
-            <li><code>client/src/App.jsx</code>: Routing logic, chat UI, model picker, TTS auto-speak, mic integration, Action Dock.</li>
+            <li><code>client/src/App.jsx</code>: Routing, chat UI, model picker, TTS, mic, and the Action Dock.</li>
           </ul>
         </section>
 
@@ -165,18 +155,17 @@ export default function Notes(){
           <ul>
             <li>Server: <code>http://localhost:3000</code> (configurable via <code>PORT</code> env).</li>
             <li>Client dev: <code>http://localhost:5173</code>, proxied <code>/api</code> → <code>:3000</code>.</li>
-            <li>Ollama: <code>http://localhost:11434</code> (ensure model is pulled).</li>
+            <li>Ollama: <code>http://localhost:11434</code>.</li>
           </ul>
         </section>
 
         <section>
           <h4>Troubleshooting</h4>
           <ul>
-            <li><strong>Kanban buttons overlap</strong>: The Action Dock auto-hides while Kanban is open; if it doesn’t, check the element id <code>#x-dock</code>.</li>
-            <li><strong>Two-color border not showing</strong>: Ensure the task has exactly two selected colors; border uses a linear-gradient split (50/50).</li>
-            <li><strong>Socket hang up / ECONNREFUSED</strong>: Start server first; verify <code>/api/health</code>.</li>
-            <li><strong>TTS fails</strong>: Check Piper voice files; server logs print <code>[TTS]</code> errors.</li>
-            <li><strong>Mic empty</strong>: Ensure browser mic permission; server logs show <code>[STT]</code> if conversion/transcription fails.</li>
+            <li><strong>Dock overlaps editor</strong>: The dock auto-hides when Productivity opens; if not, verify <code>#x-dock</code> and that the suite toggles it via <code>.dock-hidden</code>.</li>
+            <li><strong>Kanban border split</strong>: Ensure exactly two colors selected; the tile border uses a 50/50 gradient.</li>
+            <li><strong>Socket errors</strong>: Start server first; check <code>/api/health</code>.</li>
+            <li><strong>TTS</strong>/<strong>STT</strong> issues: confirm voice files and mic permissions; server logs show <code>[TTS]</code> / <code>[STT]</code>.</li>
           </ul>
         </section>
 

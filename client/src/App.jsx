@@ -7,7 +7,8 @@ import TTSControls from './components/TTSControls.jsx'
 import { speak } from './lib/tts/speak'
 import Logo from './components/Logo.jsx'
 import ChatBox from './components/ChatBox.jsx'   // compact composer (Talk + Send)
-import MiniKanban, { addKanbanTask, moveKanbanTaskByTitle } from './components/MiniKanban.jsx'  // Kanban popup
+import XenyaProductivitySuite from "./components/XenyaProductivitySuite.jsx";
+import { addKanbanTask, moveKanbanTaskByTitle } from './components/MiniKanban.jsx'  // Kanban helper APIs
 
 /* ---------- Tone & Microcopy ---------- */
 const TONE = {
@@ -100,8 +101,6 @@ async function routeMessage(content, model, history, rolePrompt){
   if (t.startsWith('/research ')) {
     const raw = t.slice(10).trim()
     const q0  = cleanQuery(raw) || raw
-    the:
-    0
     const r   = await research(q0, model)
     const summary   = r?.answer || r?.summary || '(no answer)'
     const citations = filterCitations(r?.citations || r?.sources || r?.links || [])
@@ -473,9 +472,20 @@ export default function App(){
       })
       return
     }
-    if (/^\/kanban\b/i.test(content)) {
+    
+    if (/^\/productivity\b/i.test(content) || /^\/prod\b/i.test(content)) {
       setKanbanOpen(true)
-      const aMsg = { role:'assistant', content: 'Opened Productivity → Kanban.' }
+      const aMsg = { role:'assistant', content: 'Opened Productivity Suite.' }
+      setChats(prev=>{
+        const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+        const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
+        saveChats(next); return next
+      })
+      return
+    }
+if (/^\/kanban\b/i.test(content)) {
+      setKanbanOpen(true)
+      const aMsg = { role:'assistant', content: 'Opened Productivity Suite.' }
       setChats(prev=>{
         const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
         const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
@@ -717,8 +727,8 @@ export default function App(){
         />
       </main>
 
-      {/* Productivity Popup: Kanban MVP */}
-      <MiniKanban open={kanbanOpen} onClose={()=>setKanbanOpen(false)} />
+      {/* Productivity Popup: Productivity Suite */}
+      <XenyaProductivitySuite open={kanbanOpen} onClose={()=>setKanbanOpen(false)} />
 
       {/* Delete confirmation modal */}
       {confirmDeleteId && (
