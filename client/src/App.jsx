@@ -1,4 +1,3 @@
-// client/src/App.jsx
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './theme.css'
 import Notes from './components/Notes.jsx'
@@ -8,6 +7,7 @@ import TTSControls from './components/TTSControls.jsx'
 import { speak } from './lib/tts/speak'
 import Logo from './components/Logo.jsx'
 import ChatBox from './components/ChatBox.jsx'   // compact composer (Talk + Send)
+import MiniKanban, { addKanbanTask, moveKanbanTaskByTitle } from './components/MiniKanban.jsx'  // Kanban popup
 
 /* ---------- Tone & Microcopy ---------- */
 const TONE = {
@@ -100,6 +100,8 @@ async function routeMessage(content, model, history, rolePrompt){
   if (t.startsWith('/research ')) {
     const raw = t.slice(10).trim()
     const q0  = cleanQuery(raw) || raw
+    the:
+    0
     const r   = await research(q0, model)
     const summary   = r?.answer || r?.summary || '(no answer)'
     const citations = filterCitations(r?.citations || r?.sources || r?.links || [])
@@ -191,6 +193,45 @@ function Dispatch({ items=[] }){
   )
 }
 
+/* --- inside App.jsx --- */
+function ActionDock({ onOpenNotes, onOpenProd }) {
+  const [hidden, setHidden] = useState(false);
+
+  return (
+    <>
+      <style>{`
+        .dock{position:fixed; right:16px; top:72px; z-index:10050; display:flex; flex-direction:column; align-items:flex-end; gap:10px;}
+        .dock-items{display:flex; flex-direction:column; gap:10px; transition:transform .28s ease, opacity .28s ease;}
+        .dock-hidden .dock-items{transform:translateX(16px) scale(.98); opacity:0; pointer-events:none;}
+        .fab{display:inline-flex; align-items:center; gap:8px; padding:10px 14px; border-radius:999px;
+             border:1px solid rgba(122,62,255,0.65); background:linear-gradient(180deg, rgba(122,62,255,0.95), rgba(90,43,214,0.95));
+             color:#fff; box-shadow:0 10px 18px rgba(122,62,255,0.35); cursor:pointer; font-weight:600}
+        .fab:hover{transform:translateY(-1px); box-shadow:0 14px 22px rgba(122,62,255,0.42)}
+        .fab .ico{width:18px; height:18px; display:inline-grid; place-items:center; background:rgba(255,255,255,.12); border-radius:999px}
+        .secret{width:26px; height:26px; border-radius:999px; border:1px solid rgba(255,255,255,0.18); background:rgba(255,255,255,0.06);
+                backdrop-filter:blur(6px); color:#ddd; cursor:pointer; position:relative; overflow:hidden;}
+        .secret::after{content:''; position:absolute; inset:-60%; background:conic-gradient(from 0deg, transparent 0 80%, rgba(122,62,255,.45) 82% 100%);
+                       transform:rotate(0deg); animation:spin 4.5s linear infinite; opacity:.25}
+      `}</style>
+
+      {/* NOTE: id="x-dock" so the hider can exclude our buttons */}
+      <div id="x-dock" className={`dock ${hidden ? 'dock-hidden' : ''}`}>
+        <div className="dock-items">
+          {/* data-xdock="notes" for clarity; purely informational */}
+          <button className="fab" data-xdock="notes" onClick={onOpenNotes} aria-label="Open Notes">
+            <span className="ico">＋</span> Notes
+          </button>
+          <button className="fab" onClick={onOpenProd} aria-label="Open Productivity">
+            <span className="ico">⚡</span> Productivity
+          </button>
+        </div>
+        <button className="secret" title={hidden ? 'Show quick actions' : 'Hide quick actions'} onClick={()=>setHidden(v=>!v)} />
+      </div>
+    </>
+  );
+}
+
+
 /* ---------- App ---------- */
 export default function App(){
   // models
@@ -228,6 +269,9 @@ export default function App(){
 
   // UI status for ChatBox waves
   const [uiStatus, setUiStatus] = useState('idle')
+
+  // Kanban popup toggle
+  const [kanbanOpen, setKanbanOpen] = useState(false)
 
   const endRef = useRef(null)
   const logoRef = useRef(null)
@@ -354,6 +398,45 @@ export default function App(){
     })
   }
 
+  // Hide the original Notes FAB so we only show the dock version
+  // Replace your existing "Hide the original Notes FAB" effect in App.jsx with this:
+
+  useEffect(()=>{
+    const dock = () => document.getElementById('x-dock');
+
+    const hideOriginalNotes = ()=>{
+      const d = dock();
+      const nodes = Array.from(document.querySelectorAll('button, a'));
+      // Match visible Notes buttons NOT inside our dock
+      const notesBtns = nodes.filter(el => {
+        const text = (el.textContent || '').trim();
+        if (!/notes/i.test(text)) return false;
+        if (d && d.contains(el)) return false;          // <- skip our dock buttons
+        return true;
+      });
+      // Hide all original Notes triggers we find (idempotent)
+      notesBtns.forEach(el => {
+        if (el.dataset.xHideDone) return;
+        el.dataset.xHideDone = '1';
+        el.style.display = 'none';
+      });
+    };
+
+    hideOriginalNotes();
+    const mo = new MutationObserver(() => hideOriginalNotes());
+    mo.observe(document.body, { childList:true, subtree:true });
+    return ()=>mo.disconnect();
+  },[]);
+
+
+  // Bridge to Notes: click the existing Notes trigger if present, else fire a custom event
+  const openNotesViaExisting = ()=>{
+    const candidates = Array.from(document.querySelectorAll('button, a'))
+    const btn = candidates.find(el => /notes/i.test((el.textContent||'').trim()))
+    if (btn) { btn.click(); return; }
+    window.dispatchEvent(new CustomEvent('notes:open'))
+  }
+
   /* ======= SEND helpers ======= */
   const sendFromText = async (text) => {
     const content = (text || '').trim()
@@ -366,6 +449,40 @@ export default function App(){
       saveChats(next)
       return next
     })
+
+    // Local commands for Kanban
+    if (/^\/task\s+/i.test(content)) {
+      const title = content.replace(/^\/task\s+/i, '').trim().replace(/["']/g,'')
+      const ok = title ? addKanbanTask(title, "inbox") : false
+      const aMsg = { role:'assistant', content: ok ? `Added to Inbox: **${title}**` : 'Usage: /task <title>' }
+      setChats(prev=>{
+        const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+        const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
+        saveChats(next); return next
+      })
+      return
+    }
+    if (/^\/move\s+/i.test(content)) {
+      const m = content.match(/\/move\s+"([^"]+)"\s+(inbox|doing|done)/i)
+      const ok = m ? moveKanbanTaskByTitle(m[1], m[2].toLowerCase()) : false
+      const aMsg = { role:'assistant', content: ok ? `Moved “${m[1]}” → **${m?.[2].toUpperCase()}**` : 'Usage: /move "title" inbox|doing|done' }
+      setChats(prev=>{
+        const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+        const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
+        saveChats(next); return next
+      })
+      return
+    }
+    if (/^\/kanban\b/i.test(content)) {
+      setKanbanOpen(true)
+      const aMsg = { role:'assistant', content: 'Opened Productivity → Kanban.' }
+      setChats(prev=>{
+        const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+        const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
+        saveChats(next); return next
+      })
+      return
+    }
 
     // logo flourish (no waves for typed messages)
     try { logoRef?.current?.play?.() } catch {}
@@ -382,7 +499,6 @@ export default function App(){
         return next
       })
 
-      // Stop Talk visualization as soon as reply is printed
       setUiStatus('idle')
 
       const replyText = String(aMsg.content || '')
@@ -393,7 +509,7 @@ export default function App(){
     } catch (e) {
       const errMsg = { role:'assistant', content: 'Error: ' + e.message }
       setChats(prev=>{
-        const next = prev.map(c => c.id===activeId ? { ...c, messages:[...c.messages, errMsg] } : c)
+        const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, errMsg] } : c)
         saveChats(next)
         return next
       })
@@ -406,33 +522,25 @@ export default function App(){
 
   const send = async () => { if (!input.trim()) return; await sendFromText(input) }
 
-
   // Mic transcript + status
   const handleTranscript = async (text) => {
     const t = (text || '').trim()
     if (!t) { setUiStatus('idle'); return }
     if (autoSendFromMic) {
       setInput(t)
-      // show transcribing clearly before we swap to thinking
       setUiStatus('transcribing')
-      await new Promise(r => setTimeout(r, 350))  // give the dots time to be seen
+      await new Promise(r => setTimeout(r, 350))
       setUiStatus('thinking')
       await sendFromText(t)
     } else {
       setInput(t)
     }
   }
-
-
   const handleMicStatus = (s) => {
     const norm = normalizeMicStatus(s)
-    if (norm === 'listening' || norm === 'transcribing' || norm === 'thinking' || norm === 'idle') {
-      setUiStatus(norm)
-    }
-    // do not force idle here; sendFromText will set idle once reply is printed
+    if (norm === 'listening' || norm === 'transcribing' || norm === 'thinking' || norm === 'idle') setUiStatus(norm)
   }
 
-  // model handlers
   const onSelectModel = async (name) => {
     setModelBusy(true)
     try {
@@ -455,7 +563,14 @@ export default function App(){
   /* -------- UI -------- */
   return (
     <div className="shell">
+      {/* Notes still mounts; its original FAB is hidden by the effect above */}
       <Notes/>
+
+      {/* NEW: unified action dock (Notes + Productivity + secret Hide) */}
+      <ActionDock
+        onOpenNotes={openNotesViaExisting}
+        onOpenProd={()=>setKanbanOpen(true)}
+      />
 
       {/* Sidebar */}
       <aside className="sidebar">
@@ -546,7 +661,6 @@ export default function App(){
           </div>
         </div>
 
-        {/* Loader line when busy */}
         {busy && <div className="loader-line" style={{position:'sticky', top:0, zIndex:2}} />}
 
         <div className="messages">
@@ -602,6 +716,9 @@ export default function App(){
           autoFocus
         />
       </main>
+
+      {/* Productivity Popup: Kanban MVP */}
+      <MiniKanban open={kanbanOpen} onClose={()=>setKanbanOpen(false)} />
 
       {/* Delete confirmation modal */}
       {confirmDeleteId && (

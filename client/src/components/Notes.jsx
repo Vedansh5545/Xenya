@@ -16,6 +16,13 @@ export default function Notes(){
   useEffect(() => localStorage.setItem(LS_OPEN, JSON.stringify(open)), [open])
   useEffect(() => localStorage.setItem(LS_POS, JSON.stringify(pos)), [pos])
 
+  // Allow other components to open Notes programmatically
+  useEffect(()=>{
+    const openNotes = () => setOpen(true)
+    window.addEventListener('notes:open', openNotes)
+    return () => window.removeEventListener('notes:open', openNotes)
+  },[])
+
   const onStart = (x,y) => { drag.current.active = true; drag.current.dx = x - pos.x; drag.current.dy = y - pos.y; document.body.style.userSelect = 'none' }
   const onMove = (x,y) => {
     if (!drag.current.active) return
@@ -47,7 +54,7 @@ export default function Notes(){
         <div className="notes-title">
           <span className="notes-eye" />
           <strong>Notes</strong>
-          <span className="notes-sub">Xenya MVP • Offline Speak & Listen</span>
+          <span className="notes-sub">Xenya MVP • Offline Speak & Listen • Productivity</span>
         </div>
         <div className="notes-actions">
           <button className="notes-btn" onClick={()=>setOpen(false)} title="Minimize">—</button>
@@ -61,6 +68,45 @@ export default function Notes(){
             <li>Run <code>server/server.js</code> (uses local Ollama + Piper TTS + Python Vosk STT).</li>
             <li>Run the client (<code>npm run dev</code> in <code>client/</code>).</li>
             <li>Pick a model in the sidebar, then type or use the <strong>Mic</strong>.</li>
+          </ul>
+        </section>
+
+        {/* ===== New: Mini Kanban (MVP) ===== */}
+        <section>
+          <h4>Productivity • Mini Kanban (MVP)</h4>
+          <ul>
+            <li><strong>Open</strong>: Click <em>⚡ Productivity</em> in the Action Dock (top-right). The dock hides while Kanban is open so it never overlaps the editor. <em>Esc</em> closes.</li>
+            <li><strong>Columns</strong>: <code>INBOX</code> → <code>DOING</code> → <code>DONE</code>. Drag cards between columns.</li>
+            <li><strong>Create</strong> (top row):
+              <ul>
+                <li>Type title → press <kbd>Enter</kbd> or click <em>Add</em>.</li>
+                <li>Pick up to <strong>two colors</strong> from 7 presets (Red, Orange, Yellow, Green, Blue, Purple, Gray). Two colors give a 50/50 split border.</li>
+                <li>Fast flags: <strong>P1</strong> (adds Red) and <strong>P2</strong> (adds Orange). You can also add custom flags (e.g., <code>ml</code>, <code>school</code>) — press <kbd>Enter</kbd> or <kbd>,</kbd> to commit.</li>
+              </ul>
+            </li>
+            <li><strong>Edit/Delete</strong>: Use the buttons on a card. Editing lets you change title, flags, and colors.</li>
+            <li><strong>Priority mapping</strong>:
+              <ul>
+                <li><span style={{border:'1px solid #ff4d4f', padding:'0 6px', borderRadius:6}}>Red</span> ⇒ <code>p1</code> (Priority 1).</li>
+                <li><span style={{border:'1px solid #ff9800', padding:'0 6px', borderRadius:6}}>Orange</span> ⇒ <code>p2</code> (Priority 2).</li>
+                <li>Choosing Red/Orange auto-adds the corresponding flag; flags can be edited later.</li>
+              </ul>
+            </li>
+            <li><strong>Filter & Sort</strong> (toolbar under Add):
+              <ul>
+                <li>Filter by <em>Flag</em> (P1/P2 or any custom flag) and/or by <em>Color</em>.</li>
+                <li>Sort by <em>Flag</em> (P1 → P2 → others) or by <em>Color order</em>.</li>
+              </ul>
+            </li>
+            <li><strong>Chat shortcuts</strong>:
+              <ul>
+                <li><code>/task "Title"</code> → add to Inbox.</li>
+                <li><code>/move "Title" inbox|doing|done</code> → move between columns.</li>
+                <li><code>/kanban</code> → open the Kanban popup.</li>
+                <li>(For flags/colors, use the popup for now.)</li>
+              </ul>
+            </li>
+            <li><strong>Data</strong>: Stored locally under <code>localStorage["xenya.kanban.v1"]</code>. Legacy single <code>color</code>/<code>flag</code> values are auto-migrated.</li>
           </ul>
         </section>
 
@@ -109,7 +155,8 @@ export default function Notes(){
             <li><code>server/piper/voices/*.onnx</code>: Offline TTS voices.</li>
             <li><code>client/src/components/Mic.jsx</code>: Mic recorder → uploads FormData to <code>/api/stt</code>.</li>
             <li><code>client/src/lib/tts/speak.js</code>: Fetches <code>/api/tts</code> and plays wav.</li>
-            <li><code>client/src/App.jsx</code>: Routing logic, chat UI, model picker, TTS auto-speak, mic integration.</li>
+            <li><code>client/src/components/MiniKanban.jsx</code>: Kanban popup, filters, color/flag logic.</li>
+            <li><code>client/src/App.jsx</code>: Routing logic, chat UI, model picker, TTS auto-speak, mic integration, Action Dock.</li>
           </ul>
         </section>
 
@@ -125,10 +172,11 @@ export default function Notes(){
         <section>
           <h4>Troubleshooting</h4>
           <ul>
+            <li><strong>Kanban buttons overlap</strong>: The Action Dock auto-hides while Kanban is open; if it doesn’t, check the element id <code>#x-dock</code>.</li>
+            <li><strong>Two-color border not showing</strong>: Ensure the task has exactly two selected colors; border uses a linear-gradient split (50/50).</li>
             <li><strong>Socket hang up / ECONNREFUSED</strong>: Start server first; verify <code>/api/health</code>.</li>
             <li><strong>TTS fails</strong>: Check Piper voice files; server logs print <code>[TTS]</code> errors.</li>
             <li><strong>Mic empty</strong>: Ensure browser mic permission; server logs show <code>[STT]</code> if conversion/transcription fails.</li>
-            <li><strong>Duplicate conversation keys</strong>: fixed by robust <code>uid()</code> & de-dupe on load.</li>
           </ul>
         </section>
 
@@ -136,7 +184,7 @@ export default function Notes(){
           <h4>Privacy</h4>
           <ul>
             <li>All LLM calls are local (Ollama). No cloud APIs.</li>
-            <li>Memory persists in <code>server/memory.json</code> and per-chat role in localStorage.</li>
+            <li>Kanban + chats persist locally (Kanban key: <code>xenya.kanban.v1</code>).</li>
           </ul>
         </section>
       </div>
