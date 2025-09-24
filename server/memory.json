@@ -2,6 +2,6 @@
   "users": {},
   "notes": [],
   "config": {
-    "activeModel": "qwen2.5:14b-instruct"
+    "activeModel": "llama3.2:latest"
   }
 }

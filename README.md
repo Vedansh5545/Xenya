@@ -428,6 +428,7 @@ For x86\_64 binaries on Apple Silicon, install **Rosetta** and use `arch -x86_64
 # Terminal A
 # from your current prompt in .../Xenya-3/client
 cd server
+npm i express-session nanoid
 
 # (optional) create the Python venv at project root if you haven’t already
 [ -d ../.venv ] || python3 -m venv ../.venv

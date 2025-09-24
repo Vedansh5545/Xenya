@@ -94,6 +94,145 @@ function normalizeMicStatus(s) {
   return 'idle'
 }
 
+/* ================== Calendar helpers (frontend) ================== */
+const LOCAL_CAL_KEY = 'xenya_local_events_v1'
+const API_ORIGIN = (import.meta.env.VITE_API_ORIGIN || 'http://localhost:3000').replace(/\/$/, '')
+const tzGuess = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+
+const readLocalEvents = () => {
+  try { return JSON.parse(localStorage.getItem(LOCAL_CAL_KEY)) || [] } catch { return [] }
+}
+const writeLocalEvents = (items) => {
+  localStorage.setItem(LOCAL_CAL_KEY, JSON.stringify(items || []))
+  // ping the UI (same tab) that data changed
+  window.dispatchEvent(new CustomEvent('calendar:changed'))
+}
+
+const addLocalEvent = ({ title, start, end, tz, location, notes }) => {
+  const items = readLocalEvents()
+  const ev = {
+    id: 'loc_' + uid(),
+    title: String(title || 'Untitled'),
+    start: new Date(start).toISOString(),
+    end:   new Date(end).toISOString(),
+    tz: tz || tzGuess(),
+    location: location || '',
+    notes: notes || '',
+    source: 'local'
+  }
+  writeLocalEvents([ev, ...items])
+  return ev
+}
+const patchLocalEvent = (id, patch) => {
+  const items = readLocalEvents()
+  const idx = items.findIndex(e => e.id === id)
+  if (idx === -1) return false
+  items[idx] = { ...items[idx], ...patch }
+  writeLocalEvents(items)
+  return true
+}
+const deleteLocalEvent = (id) => {
+  const items = readLocalEvents().filter(e => e.id !== id)
+  writeLocalEvents(items)
+  return true
+}
+
+const fmt = (d) => {
+  try {
+    const dd = new Date(d)
+    return dd.toLocaleString([], { dateStyle:'medium', timeStyle:'short' })
+  } catch { return d }
+}
+const fmtRange = (s,e) => `${fmt(s)} → ${fmt(e)}`
+const clampDayStart = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x }
+const clampDayEnd = (d) => { const x = new Date(d); x.setHours(23,59,59,999); return x }
+
+/** parse date range words or "YYYY-MM-DD..YYYY-MM-DD" */
+function parseRange(arg){
+  const now = new Date()
+  const word = (arg || '').toLowerCase().trim()
+  if (!arg || word === 'week') {
+    const day = now.getDay() // 0..6 (Sun..Sat)
+    const mondayOffset = (day + 6) % 7
+    const start = clampDayStart(new Date(now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset))
+    const end = clampDayEnd(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6))
+    return { label:'week', start, end }
+  }
+  if (word === 'today') {
+    const start = clampDayStart(now); const end = clampDayEnd(now)
+    return { label:'today', start, end }
+  }
+  if (word === 'month') {
+    const start = clampDayStart(new Date(now.getFullYear(), now.getMonth(), 1))
+    const end = clampDayEnd(new Date(now.getFullYear(), now.getMonth()+1, 0))
+    return { label:'month', start, end }
+  }
+  // ISO range
+  const m = String(arg).match(/(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})/)
+  if (m) {
+    const start = clampDayStart(new Date(m[1]))
+    const end   = clampDayEnd(new Date(m[2]))
+    return { label:`${m[1]}..${m[2]}`, start, end }
+  }
+  // Fallback: treat as week
+  const start = clampDayStart(now); const end = clampDayEnd(new Date(now.getTime()+6*864e5))
+  return { label:'week', start, end }
+}
+
+async function outlookStatus(){
+  try{
+    const r = await fetch(`${API_ORIGIN}/calendar/status`, { credentials:'include' })
+    if(!r.ok) return { connected:false }
+    return await r.json()
+  }catch{ return { connected:false } }
+}
+async function outlookUpcoming(fromISO, toISO, tz = tzGuess()){
+  try{
+    const qs = new URLSearchParams({ from: fromISO, to: toISO, tz }).toString()
+    const r = await fetch(`${API_ORIGIN}/calendar/upcoming?${qs}`, { credentials:'include' })
+    if(!r.ok) return []
+    const data = await r.json()
+    // map to unified shape
+    const arr = Array.isArray(data) ? data : (data.value || [])
+    return arr.map(ev => ({
+      id: ev.id,
+      title: ev.subject || '(no title)',
+      start: ev.start?.dateTime,
+      end: ev.end?.dateTime,
+      location: ev.location?.displayName || '',
+      notes: ev.bodyPreview || '',
+      webLink: ev.webLink || '',
+      source: 'outlook'
+    }))
+  }catch{ return [] }
+}
+
+function renderEventsMarkdown(events, title='Events'){
+  if(!events.length) return `**${title}**\n\n(no events)`
+  const lines = events
+    .sort((a,b)=>new Date(a.start)-new Date(b.start))
+    .map(ev=>{
+      const tag = ev.source === 'outlook' ? 'O' : 'L'
+      const line = `- [${tag}] ${fmtRange(ev.start, ev.end)} — **${ev.title}**${ev.location ? ` · _${ev.location}_` : ''}${ev.source==='outlook' && ev.webLink ? ` · [open](${ev.webLink})` : ''}\n  \`id:${ev.id}\``
+      return line
+    })
+  return `**${title}**\n\n${lines.join('\n')}`
+}
+
+function parseKVFlags(s){
+  // parses loc:"Room A" notes:"something" (both optional)
+  const res = {}
+  const rx = /\b(loc|location|notes|tz):"([^"]*)"/gi
+  let m; while((m = rx.exec(s))) {
+    const k = m[1].toLowerCase()
+    const v = m[2]
+    if (k === 'location' || k === 'loc') res.location = v
+    else if (k === 'notes') res.notes = v
+    else if (k === 'tz') res.tz = v
+  }
+  return res
+}
+
 /* ---------- Router ---------- */
 async function routeMessage(content, model, history, rolePrompt){
   const t = content.trim()
@@ -192,7 +331,7 @@ function Dispatch({ items=[] }){
   )
 }
 
-/* --- inside App.jsx --- */
+/* --- Action Dock (Notes + Productivity) --- */
 function ActionDock({ onOpenNotes, onOpenProd }) {
   const [hidden, setHidden] = useState(false);
 
@@ -213,10 +352,8 @@ function ActionDock({ onOpenNotes, onOpenProd }) {
                        transform:rotate(0deg); animation:spin 4.5s linear infinite; opacity:.25}
       `}</style>
 
-      {/* NOTE: id="x-dock" so the hider can exclude our buttons */}
       <div id="x-dock" className={`dock ${hidden ? 'dock-hidden' : ''}`}>
         <div className="dock-items">
-          {/* data-xdock="notes" for clarity; purely informational */}
           <button className="fab" data-xdock="notes" onClick={onOpenNotes} aria-label="Open Notes">
             <span className="ico">＋</span> Notes
           </button>
@@ -269,7 +406,7 @@ export default function App(){
   // UI status for ChatBox waves
   const [uiStatus, setUiStatus] = useState('idle')
 
-  // Kanban popup toggle
+  // Productivity Suite modal
   const [kanbanOpen, setKanbanOpen] = useState(false)
 
   const endRef = useRef(null)
@@ -398,8 +535,6 @@ export default function App(){
   }
 
   // Hide the original Notes FAB so we only show the dock version
-  // Replace your existing "Hide the original Notes FAB" effect in App.jsx with this:
-
   useEffect(()=>{
     const dock = () => document.getElementById('x-dock');
 
@@ -414,7 +549,7 @@ export default function App(){
         return true;
       });
       // Hide all original Notes triggers we find (idempotent)
-      notesBtns.forEach(el => {
+        notesBtns.forEach(el => {
         if (el.dataset.xHideDone) return;
         el.dataset.xHideDone = '1';
         el.style.display = 'none';
@@ -426,7 +561,6 @@ export default function App(){
     mo.observe(document.body, { childList:true, subtree:true });
     return ()=>mo.disconnect();
   },[]);
-
 
   // Bridge to Notes: click the existing Notes trigger if present, else fire a custom event
   const openNotesViaExisting = ()=>{
@@ -448,6 +582,151 @@ export default function App(){
       saveChats(next)
       return next
     })
+
+    /* ---------- Calendar: /events ---------- */
+    if (/^\/events\b/i.test(content)) {
+      try{
+        // parse: /events [today|week|month|YYYY-MM-DD..YYYY-MM-DD] [local|outlook]
+        const args = content.replace(/^\/events\s*/i,'').trim()
+        const parts = args.split(/\s+/).filter(Boolean)
+        const rangeToken = parts[0] && !/^(local|outlook)$/i.test(parts[0]) ? parts[0] : ''
+        const sourceToken = parts.find(p => /^(local|outlook)$/i.test(p)) || 'both'
+        const { label, start, end } = parseRange(rangeToken)
+        const tz = tzGuess()
+
+        const wantLocal = /local/i.test(sourceToken) || sourceToken === 'both'
+        const wantOutlook = /outlook/i.test(sourceToken) || sourceToken === 'both'
+
+        let events = []
+        if (wantLocal) {
+          const local = readLocalEvents().filter(e=>{
+            const s = new Date(e.start).getTime()
+            return s >= start.getTime() && s <= end.getTime()
+          })
+          events = events.concat(local)
+        }
+
+        if (wantOutlook) {
+          const st = await outlookStatus()
+          if (st.connected) {
+            const remote = await outlookUpcoming(start.toISOString(), end.toISOString(), tz)
+            events = events.concat(remote)
+          }
+        }
+
+        const textMd = renderEventsMarkdown(events, `Events • ${label}${sourceToken!=='both' ? ` • ${sourceToken.toLowerCase()}`:''}`)
+        const aMsg = { role:'assistant', content: textMd }
+        setChats(prev=>{
+          const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+          const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
+          saveChats(next); return next
+        })
+      }catch(e){
+        const errMsg = { role:'assistant', content: 'Calendar error: ' + (e.message||e) }
+        setChats(prev=>{
+          const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+          const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, errMsg] } : c)
+          saveChats(next); return next
+        })
+      }
+      return
+    }
+
+    /* ---------- Calendar Local CRUD: /cal ... ---------- */
+    if (/^\/cal\b/i.test(content)) {
+      const help = () => (
+        { role:'assistant', content:
+`**Calendar (local)**
+- /cal add "Title" 2025-09-24T15:00..2025-09-24T16:00 loc:"HQ" notes:"Standup"
+- /cal rename <id> "New title"
+- /cal move <id> 2025-09-24T17:00..2025-09-24T18:00
+- /cal delete <id>
+Tip: use /events week local to see ids.` })
+
+      try{
+        const s = content
+
+        // ADD
+        let m = s.match(/\/cal\s+add\s+(['"])(.+?)\1\s+(\S+)\.\.(\S+)(.*)$/i)
+        if (m) {
+          const [, , title, startStr, endStr, tail] = m
+          const flags = parseKVFlags(tail||'')
+          const ev = addLocalEvent({
+            title,
+            start: startStr,
+            end: endStr,
+            tz: flags.tz,
+            location: flags.location,
+            notes: flags.notes
+          })
+          const aMsg = { role:'assistant', content: `Added local event **${ev.title}**\n\n- When: ${fmtRange(ev.start, ev.end)}\n- id: \`${ev.id}\`` }
+          setChats(prev=>{
+            const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+            const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
+            saveChats(next); return next
+          })
+          return
+        }
+
+        // RENAME
+        m = s.match(/\/cal\s+rename\s+(\S+)\s+(['"])(.+?)\2/i)
+        if (m) {
+          const [, id, , newTitle] = m
+          const ok = patchLocalEvent(id, { title: newTitle })
+          const aMsg = { role:'assistant', content: ok ? `Renamed \`${id}\` → **${newTitle}**` : `No local event with id \`${id}\`.` }
+          setChats(prev=>{
+            const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+            const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
+            saveChats(next); return next
+          })
+          return
+        }
+
+        // MOVE / EDIT TIMES
+        m = s.match(/\/cal\s+(move|edit)\s+(\S+)\s+(\S+)\.\.(\S+)/i)
+        if (m) {
+          const [, , id, startStr, endStr] = m
+          const ok = patchLocalEvent(id, { start: new Date(startStr).toISOString(), end: new Date(endStr).toISOString() })
+          const aMsg = { role:'assistant', content: ok ? `Updated \`${id}\` → ${fmtRange(startStr, endStr)}` : `No local event with id \`${id}\`.` }
+          setChats(prev=>{
+            const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+            const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
+            saveChats(next); return next
+          })
+          return
+        }
+
+        // DELETE
+        m = s.match(/\/cal\s+delete\s+(\S+)/i)
+        if (m) {
+          const [, id] = m
+          const ok = deleteLocalEvent(id)
+          const aMsg = { role:'assistant', content: ok ? `Deleted local event \`${id}\`.` : `No local event with id \`${id}\`.` }
+          setChats(prev=>{
+            const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+            const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
+            saveChats(next); return next
+          })
+          return
+        }
+
+        // HELP (fallback)
+        setChats(prev=>{
+          const aMsg = help()
+          const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+          const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
+          saveChats(next); return next
+        })
+      } catch (e) {
+        const errMsg = { role:'assistant', content: 'Calendar error: ' + (e.message || e) }
+        setChats(prev=>{
+          const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+          const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, errMsg] } : c)
+          saveChats(next); return next
+        })
+      }
+      return
+    }
 
     // Local commands for Kanban
     if (/^\/task\s+/i.test(content)) {
@@ -472,18 +751,8 @@ export default function App(){
       })
       return
     }
-    
-    if (/^\/productivity\b/i.test(content) || /^\/prod\b/i.test(content)) {
-      setKanbanOpen(true)
-      const aMsg = { role:'assistant', content: 'Opened Productivity Suite.' }
-      setChats(prev=>{
-        const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
-        const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
-        saveChats(next); return next
-      })
-      return
-    }
-if (/^\/kanban\b/i.test(content)) {
+
+    if (/^\/productivity\b/i.test(content) || /^\/prod\b/i.test(content) || /^\/kanban\b/i.test(content)) {
       setKanbanOpen(true)
       const aMsg = { role:'assistant', content: 'Opened Productivity Suite.' }
       setChats(prev=>{
@@ -519,7 +788,11 @@ if (/^\/kanban\b/i.test(content)) {
     } catch (e) {
       const errMsg = { role:'assistant', content: 'Error: ' + e.message }
       setChats(prev=>{
-        const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, errMsg] } : c)
+        const current = prev.find(c => c.id === activeId)
+        const newTitle = titleFromFirstUser(current)
+        const next = prev.map(c =>
+          c.id === activeId ? { ...c, title: newTitle, messages: [...c.messages, errMsg] } : c
+        )
         saveChats(next)
         return next
       })
@@ -576,7 +849,7 @@ if (/^\/kanban\b/i.test(content)) {
       {/* Notes still mounts; its original FAB is hidden by the effect above */}
       <Notes/>
 
-      {/* NEW: unified action dock (Notes + Productivity + secret Hide) */}
+      {/* Unified action dock (Notes + Productivity + secret Hide) */}
       <ActionDock
         onOpenNotes={openNotesViaExisting}
         onOpenProd={()=>setKanbanOpen(true)}

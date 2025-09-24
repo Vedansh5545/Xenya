@@ -4,6 +4,19 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   server: {
-    proxy: { '/api': 'http://localhost:3000' } // proxy API → Express server
-  }
+    proxy: {
+      // Chat/research/etc.
+      '/api': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false,
+      },
+      // Calendar & OAuth flow (popup + callback)
+      '^/(calendar|oauth|auth)': {
+        target: 'http://localhost:3000',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 })

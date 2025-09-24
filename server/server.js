@@ -1,14 +1,17 @@
 // Xenya — Phase 1 backend (chat + research + summary + RSS + memory + TTS + STT)
+import 'dotenv/config'
 import express from 'express'
 import cors from 'cors'
 import fs from 'fs'
 import fsp from 'fs/promises'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import dotenv from 'dotenv'
 import * as cheerio from 'cheerio'
 import Parser from 'rss-parser'
 import { JSDOM } from 'jsdom'
 import { Readability } from '@mozilla/readability'
+import { calendarRouter } from './calendar.js'
 
 // STT deps
 import multer from 'multer'
@@ -21,12 +24,19 @@ ffmpeg.setFfmpegPath(ffmpegStatic)
 // TTS
 import { synthesizeWithPiper } from './tts.js'
 
+// --- resolve __dirname in ESM and load .env next to this file ---
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
+dotenv.config({ path: path.join(__dirname, '.env') })
+console.log('[env] MS_CLIENT_ID present:', !!process.env.MS_CLIENT_ID)
 
 const app = express()
-app.use(cors())
+
+app.use(cors({ origin: process.env.CLIENT_ORIGIN || true, credentials: true }))
 app.use(express.json({ limit: '1mb' }))
+
+// Outlook Calendar (OAuth + Graph) router
+app.use(calendarRouter())
 
 // --- Config
 const PORT = process.env.PORT || 3000
@@ -35,8 +45,13 @@ const MEMORY_PATH = path.join(__dirname, 'memory.json')
 const UA_HEADERS = { 'User-Agent': 'Mozilla/5.0 (XenyaBot; +local)' }
 
 // ---------- Memory ----------
-function readMemory() { try { return JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8')) } catch { return { users:{}, notes:[], config:{} } } }
-function writeMemory(obj) { fs.writeFileSync(MEMORY_PATH, JSON.stringify(obj, null, 2), 'utf8') }
+function readMemory() {
+  try { return JSON.parse(fs.readFileSync(MEMORY_PATH, 'utf8')) }
+  catch { return { users:{}, notes:[], config:{} } }
+}
+function writeMemory(obj) {
+  fs.writeFileSync(MEMORY_PATH, JSON.stringify(obj, null, 2), 'utf8')
+}
 
 // ---------- Utils ----------
 function trimText(s, max=8000){ return s ? (s.length>max ? s.slice(0,max)+'\n…[truncated]' : s) : '' }
