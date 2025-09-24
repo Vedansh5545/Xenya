@@ -1,9 +1,9 @@
 # Xenya — The Digital Attaché (Local, Voice-Ready)
 
-Xenya is a **local, privacy-first assistant** that runs against your **Ollama** LLMs, can **summarize URLs, research topics with light web scraping**, and supports **text-to-speech (TTS)** and **speech-to-text (STT)** for hands-free conversations.
+Xenya is a **local, privacy-first assistant** that runs against your **Ollama** LLMs, can **summarize URLs, research topics with light web scraping**, does **text-to-speech (TTS)** and **speech-to-text (STT)**, and now includes a **Calendar** with **local events** (stored on-device) plus optional **Outlook** integration via Microsoft Graph (OAuth PKCE).
 
-* **Backend:** Node.js + Express (talks to Ollama; scrapes/summarizes pages; TTS via Piper; STT via Vosk in Python).
-* **Frontend:** Vite + React (chat UI, model picker, role prompt editor, TTS controls, microphone capture).
+* **Backend:** Node.js + Express (Ollama relay; summaries/research; TTS via Piper; STT via Vosk in Python; Outlook Calendar).
+* **Frontend:** Vite + React (chat UI, model picker, role prompt, TTS controls, microphone, **Calendar tile**, **chat slash-commands**).
 
 ---
 
@@ -16,20 +16,25 @@ Xenya is a **local, privacy-first assistant** that runs against your **Ollama** 
 5. [File-by-File: Client](#file-by-file-client)
 6. [Environment & Voices/Models](#environment--voicesmodels)
 7. [How to Use the App](#how-to-use-the-app)
-8. [API Endpoints](#api-endpoints)
-9. [Troubleshooting](#troubleshooting)
-10. [Next Steps & Notes](#next-steps--notes)
+8. [Calendar Setup (Outlook + Local)](#calendar-setup-outlook--local)
+9. [Calendar • Control from Chat](#calendar--control-from-chat)
+10. [API Endpoints](#api-endpoints)
+11. [Troubleshooting](#troubleshooting)
+12. [Next Steps & Notes](#next-steps--notes)
 
 ---
 
 ## Features
 
 * Chat locally with any **Ollama** model (e.g., `qwen2.5:14b-instruct`, `llama3.1:8b`).
-* Paste a **URL** to get a concise summary (Readability + fallback meta).
-* Type `/research <topic>` for **quick research** with citations (DuckDuckGo/Bing HTML).
-* **TTS** via Piper voices (e.g., `en_GB-jenny_dioco-medium.onnx`) — play replies automatically.
-* **STT** via Vosk small English model — use mic to speak queries, auto-send transcript.
-* Lightweight **memory** (JSON file) for config/user data.
+* Paste a **URL** to get a concise summary.
+* `/research <topic>` for **quick research** with citations.
+* **TTS** via Piper voices; **STT** via Vosk.
+* **Calendar**
+
+  * **Local events**: saved in `localStorage` (instant UI).
+  * **Outlook**: OAuth (PKCE) + Microsoft Graph; list & push from UI.
+  * **From chat**: list date ranges, add/rename/move/delete **local** items with slash-commands.
 
 ---
 
@@ -37,10 +42,10 @@ Xenya is a **local, privacy-first assistant** that runs against your **Ollama** 
 
 ### 0) Prerequisites
 
-* **Node.js 18+ (recommended 20.x)**
-* **Python 3.9+** (we use a venv for `piper-tts` and `vosk`)
-* **Ollama** installed and running: [https://ollama.com](https://ollama.com)
-* macOS: Homebrew recommended. (Linux works, Windows WSL may need extra steps.)
+* **Node.js 18+** (20.x recommended)
+* **Python 3.9+** (`venv` for TTS/STT)
+* **Ollama** running locally
+* Optional: Microsoft Entra ID (Azure) app registration for Outlook calendar
 
 ### 1) Clone
 
@@ -58,60 +63,102 @@ python -m pip install --upgrade pip
 pip install piper-tts vosk soundfile numpy
 ```
 
-> The **frontend and server** are independent from this venv, but the backend calls this Python to perform STT and also uses the `piper` Python wheel if needed.
-
-### 3) Piper Voices & Vosk Model
-
-Put voices under `server/piper/voices/` (you already have two):
+### 3) Assets: Piper Voices & Vosk Model
 
 ```
 server/piper/voices/
   en_GB-jenny_dioco-medium.onnx
   en_GB-jenny_dioco-medium.onnx.json
-  en_GB-cori-high.onnx
-  en_GB-cori-high.onnx.json
-```
+  (… any others)
 
-Put a Vosk English model here:
-
-```
 server/models/vosk/vosk-model-small-en-us-0.15/
-  (am, conf, graph, ivector, README)
+  am/ conf/ graph/ ivector/ …
 ```
-
-*(Folder name should match exactly; contents should look like your `ls` output.)*
 
 ### 4) Install Node deps (server & client)
 
 ```bash
-# in Xenya-2/server
+# in server
 cd server
 npm install
 
-# in Xenya-2/client
+# in client
 cd ../client
 npm install
 ```
 
-> The server avoids `vosk` Node bindings (which pull `ffi-napi`) and instead uses the **Python** Vosk — so the usual node-gyp headaches shouldn’t appear.
-
-### 5) Make sure Ollama has your model
+### 5) Ollama model
 
 ```bash
 ollama pull qwen2.5:14b-instruct
-# or llama3.1:8b / mistral:7b-instruct / gemma:7b-instruct, etc.
+# or llama3.1:8b / mistral / gemma, etc.
 ```
 
-### 6) Run backend
+### 6) **Calendar env (server/.env)**
+
+Create `server/.env` (values shown are typical for local dev):
+
+```
+# app + dev origins
+BASE_URL=http://localhost:3000
+CLIENT_ORIGIN=http://localhost:5173
+SESSION_SECRET=xenya-dev
+
+# Outlook / Microsoft Graph
+MS_CLIENT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+MS_CLIENT_SECRET=                            # optional (confidential client)
+MS_TENANT_ID=common                          # or your tenant id
+MS_REDIRECT_PATH=/oauth/callback
+DEFAULT_TZ=America/Chicago
+
+# (optional) extra scopes, whitespace/comma separated
+# MS_EXTRA_SCOPES=
+```
+
+> **Entra ID (Azure) app registration**
+>
+> * App type: “Web”.
+> * Redirect URI (Web): `http://localhost:3000/oauth/callback`
+> * Allow `Accounts in any organizational directory` if you use `MS_TENANT_ID=common`.
+> * API permissions: **Microsoft Graph** → **offline\_access**, **openid**, **profile**, **email**, **Calendars.ReadWrite**.
+
+### 6.1) **Client env (client/.env)**
+
+```
+VITE_API_ORIGIN=http://localhost:3000
+```
+
+### 6.2) **Vite proxy (client/vite.config.js)**
+
+Make sure both API **and calendar** endpoints proxy to the server in dev:
+
+```js
+import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    proxy: {
+      '/api': 'http://localhost:3000',
+      '/calendar': 'http://localhost:3000',
+      '/oauth': 'http://localhost:3000',
+    }
+  }
+})
+```
+
+> If you **don’t** use the proxy, always call absolute server URLs (`VITE_API_ORIGIN`) from the client, and open Outlook connect at `http://localhost:3000/calendar/connect` (server origin), not `:5173`.
+
+### 7) Run backend
 
 ```bash
-# back to Xenya-2/server
 cd ../server
 VENV_PY="$(cd .. && pwd)/.venv/bin/python" node server.js
-# You should see: ✅ Xenya server listening on http://localhost:3000
+# ✅ Xenya server listening on http://localhost:3000
 ```
 
-### 7) Run frontend
+### 8) Run frontend
 
 ```bash
 cd ../client
@@ -126,32 +173,22 @@ npm run dev
 ```
 Xenya-2/
 ├── client/
-│   ├── index.html
 │   ├── vite.config.js
 │   └── src/
-│       ├── App.jsx                 ← Main React app
-│       ├── theme.css               ← Styling
+│       ├── App.jsx                         ← Chat + slash commands (calendar /events, /cal …)
 │       ├── components/
-│       │   ├── Notes.jsx
-│       │   ├── MarkdownMessage.jsx
-│       │   ├── TTSControls.jsx
-│       │   ├── Mic.jsx
-│       │   └── ErrorBoundary.jsx   (optional, if present)
+│       │   ├── XenyaProductivitySuite.jsx  ← Includes Calendar tile (reads local+Outlook)
+│       │   └── OutlookCalendar.jsx         ← UI for connect/list/push
 │       └── lib/
-│           ├── api.js              ← Calls backend API
-│           └── tts/
-│               └── speak.js        ← Fetches WAV from server and plays it
+│           ├── api.js
+│           └── tts/speak.js
 └── server/
-    ├── server.js                   ← Express backend (Ollama, summary, research, RSS, memory, TTS, STT)
-    ├── tts.js                      ← Piper invocation wrapper
-    ├── stt_py.py                   ← Vosk (Python) STT; reads WAV from stdin and prints JSON
-    ├── memory.json                 ← Lightweight storage (autocreated)
-    ├── piper/
-    │   ├── piper/                  ← Piper runtime dir (espeak data, libs; may exist if unpacked)
-    │   └── voices/                 ← .onnx voice models (+ .json configs)
-    └── models/
-        └── vosk/
-            └── vosk-model-small-en-us-0.15/   ← Vosk STT model folder
+    ├── server.js                           ← Mounts calendarRouter()
+    ├── calendar.js                         ← Outlook OAuth (PKCE) + Graph calendar routes
+    ├── tts.js
+    ├── stt_py.py
+    ├── piper/voices/
+    └── models/vosk/vosk-model-small-en-us-0.15/
 ```
 
 ---
@@ -160,292 +197,171 @@ Xenya-2/
 
 ### `server/server.js`
 
-**The main Express server.** Responsibilities:
+* Existing endpoints (Ollama chat, research, summary, RSS, TTS, STT).
+* **Calendar**: imports and mounts `calendarRouter()` from `calendar.js`.
+  Routes (mounted at root):
+  `GET /calendar/status` · `GET /calendar/upcoming` · `POST /calendar/upsert` · `DELETE /calendar/:eventId` · `GET /calendar/connect` · `GET /oauth/callback` · `POST /auth/logout`.
 
-* **Model management**
+### `server/calendar.js`
 
-  * `/api/models` — list installed Ollama models (via `OLLAMA_URL/api/tags`).
-  * `/api/models/select` — set `ACTIVE_MODEL` (stored in `memory.json`).
-  * `/api/models/refresh` — re-sync list from Ollama.
-  * `/api/health` — ping Ollama and report status.
+* Outlook OAuth (PKCE) using `express-session`.
+* Reads **MS\_CLIENT\_ID**, **MS\_TENANT\_ID**, **BASE\_URL**, **CLIENT\_ORIGIN**, **MS\_REDIRECT\_PATH**, **DEFAULT\_TZ**.
+* Talks to **Microsoft Graph** (`/me/calendarView`, `/me/events`) for listing and creating/deleting events.
 
-* **Chat**
-
-  * `/api/chat` — forwards messages to Ollama `/api/chat` with optional system prompt.
-
-* **Memory**
-
-  * `/api/memory` — simple JSON KV per user (get/set/delete).
-
-* **Search & Research**
-
-  * `/api/search` — DuckDuckGo/Bing HTML scraping (server-side) returning top links.
-  * `/api/summary?url=` — fetch URL, extract **Readability** text (fallback to meta), summarize with Ollama.
-  * `/api/rss` — fetch RSS (BBC + Reuters by default).
-  * `/api/research?q=` — expand acronyms / enhance topic; merge top links; pull Wikipedia summary; ask Ollama to synthesize an answer with inline citations `[S1]`… and a link list.
-
-* **TTS**
-
-  * `/api/tts` — accepts `{ text, voice }`, invokes `synthesizeWithPiper` (from `tts.js`), returns a **WAV** buffer.
-
-* **STT**
-
-  * `/api/stt` (POST `multipart/form-data` with `audio` as a `webm` blob)
-
-    * Converts **webm → wav (16k mono)** with `ffmpeg-static` (via `fluent-ffmpeg`)
-    * Spawns Python (`VENV_PY` or `../.venv/bin/python`) to run `stt_py.py`
-    * Pipes WAV to Python’s stdin and returns `{ text }` from its stdout JSON.
-
-* **Helpers**
-
-  * Fetch with timeout, Readability extraction, DuckDuckGo/Bing HTML parsers, Wikipedia lookup, model picker logic, `memory.json` read/write.
-
-**Env vars:**
-
-* `PORT` (default `3000`)
-* `OLLAMA_URL` (default `http://localhost:11434`)
-* `OLLAMA_MODEL` (preferred model name; otherwise chosen from installed)
-* `VENV_PY` (path to Python binary to run `stt_py.py`)
-
----
-
-### `server/tts.js`
-
-**Piper TTS wrapper** used by `/api/tts`. It:
-
-* Accepts `{ text, voice }`.
-* Spawns **piper** (prefer the Python `piper` from venv, which ships a CLI via the wheel) **OR** calls the local binary if configured.
-* Writes WAV to **stdout** and collects it into a Node `Buffer` returned to the route.
-
-> You’re already using `piper-tts` wheel in `.venv`, which gives a `piper` CLI. The code streams synthesized audio to Node and back to the browser.
-
----
-
-### `server/stt_py.py`
-
-**Python STT bridge with Vosk.**
-
-* Reads whole **WAV** (16 kHz mono) from `stdin`.
-* Uses `vosk.Model` from `server/models/vosk/...`.
-* Runs recognition and prints a single JSON object: `{"text": "recognized text"}`.
-* Cleans up temp files.
-
----
-
-### `server/memory.json`
-
-Autocreated JSON file storing:
-
-* `config.activeModel` — last selected model
-* `users` — key/value store (if you use memory route)
-* `notes` — currently unused placeholder
-
----
-
-### `server/piper/voices/*.onnx[.json]`
-
-Your Piper voices. Examples:
-
-* `en_GB-jenny_dioco-medium.onnx`
-* `en_GB-cori-high.onnx`
-
-The `.json` file contains voice config (sample rate, etc). The server simply passes the path to Piper.
+(Other server files unchanged.)
 
 ---
 
 ## File-by-File: Client
 
-### `client/src/App.jsx`
+Key bits are unchanged **plus**:
 
-**Main UI.** Handles:
-
-* **State:** chats (saved in `localStorage`), selected model, role prompt, input box.
-* **Routing:** decides between `/research`, URL summary, news (RSS), or plain chat.
-* **TTS:** after an assistant reply, optionally calls `speak(text, voice)` to play audio.
-* **STT:** embeds `<Mic onTranscript={handleTranscript} />` to record from the browser and POST to `/api/stt`.
-* **De-duping chat IDs:** robust `uid`/`makeId` logic avoids duplicate React keys.
-* **Model controls:** select/refresh models and persist choice on server.
-
-### `client/src/components/Notes.jsx`
-
-A small notes panel (scratchpad) you can extend to store to server memory, or keep as local helpers.
-
-### `client/src/components/MarkdownMessage.jsx`
-
-Renders assistant/user messages with Markdown (headings, lists, code blocks). Keeps the “Copy” button functional.
-
-### `client/src/components/TTSControls.jsx`
-
-UI toggle to auto-speak replies and a “Speak last” button. It calls the exported `speak()` util with `lastReply` and a selected voice (you can surface voice choice here; the prop currently wires a fixed voice in `App.jsx`).
-
-### `client/src/components/Mic.jsx`
-
-Captures microphone audio via **MediaRecorder** (`audio/webm`), sends it as `multipart/form-data` to `/api/stt`, receives `{ text }`, and calls the provided `onTranscript(text)` callback. The `App` then **auto-sends** the transcript if that toggle is on.
-
-### `client/src/lib/api.js`
-
-Thin fetch wrappers for:
-
-* `/api/chat`
-* `/api/summary?url=`
-* `/api/research?q=`
-* `/api/rss`
-* `/api/models`, `/api/models/select`, `/api/models/refresh`
-
-This keeps the UI clean and makes it easy to stub/mock later.
-
-### `client/src/lib/tts/speak.js`
-
-Fetches `/api/tts` with `{text, voice}` and plays the returned **WAV** via `AudioContext`/`AudioBufferSourceNode` or `<audio>` fallback. Handles small errors quietly so UI doesn’t crash if TTS is unavailable.
-
-### `client/src/theme.css`
-
-All of the app’s look & feel: layout grid (sidebar/main), message bubbles, buttons, inputs, dark theme colors, small toast animations, etc.
+* **Calendar tile** (in Productivity Suite) shows **Local** + **Outlook** (if connected).
+  Local events are at `localStorage["xenya_local_events_v1"]`.
+* **Chat slash-commands** (see next sections).
 
 ---
 
 ## Environment & Voices/Models
 
-* **Ollama** must be running. `OLLAMA_URL` is configurable (defaults to `http://localhost:11434`).
-
-* **Model choice**:
-
-  * The server auto-picks from installed models if your preferred one isn’t available.
-  * In the UI, use the dropdown to select a model; it POSTs to `/api/models/select`.
-
-* **Piper voices** (server side):
-
-  * Place `.onnx` + `.onnx.json` under `server/piper/voices/`.
-  * In `App.jsx`, we pass `'en_GB-jenny_dioco-medium.onnx'` to `speak()`; change to whichever you prefer.
-
-* **Vosk model**:
-
-  * Default expect path: `server/models/vosk/vosk-model-small-en-us-0.15/`.
-  * You can use a different language/model: change the path in `stt_py.py` or make it read an env var.
+*(same as before)*
 
 ---
 
 ## How to Use the App
 
-1. **Pick a model** in the left sidebar (after the list loads).
+1. Pick a model.
+2. Adjust the role prompt if you like (autosaves).
+3. **Calendar**
 
-2. **(Optional) Adjust the role prompt** (the system instruction for style/tone) — it auto-saves on blur.
+   * **Local events** just work (stored on-device).
+   * **Connect Outlook**: open the Calendar tile and click **Connect**, or visit
+     `http://localhost:3000/calendar/connect`. A window opens, sign in, it will say *“Connected”* and you can close it.
+4. Use slash-commands in chat (next section).
 
-3. **Type** a message and hit **Send**, or:
+---
 
-   * Paste a **URL** → you’ll get a summary.
-   * Type `/research your topic` → quick web research with citations.
-   * Type `news` or “latest news” → top BBC/Reuters headlines.
+## Calendar Setup (Outlook + Local)
 
-4. **Speak**: Click the **Mic** button, talk, stop — the transcript will appear and (by default) auto-send.
+* Local events are instant and stored at `localStorage["xenya_local_events_v1"]`.
+* Outlook is session-based (cookie). For cross-origin (`5173`↔`3000`), the server sets `SameSite=None` and may need HTTPS in some browsers. Prefer using the **Vite proxy** above for fewer cookie headaches.
 
-5. **Hear**: Xenya will **speak** replies using your chosen Piper voice (toggle in “Speech” box).
+**Manual check**
+
+* Status: `GET http://localhost:3000/calendar/status`
+* Connect: `GET http://localhost:3000/calendar/connect`
+* Upcoming: `GET http://localhost:3000/calendar/upcoming?from=ISO&to=ISO&tz=America/Chicago`
+
+---
+
+## Calendar • Control from Chat
+
+You can manage calendar items directly in chat.
+**Local** items are editable; **Outlook** items are read-only from chat (but you can push local→Outlook from the Calendar UI).
+
+### List events — `/events`
+
+```
+/events                # current week, Local + Outlook (if connected)
+/events today
+/events week
+/events month
+/events 2025-09-20..2025-09-27
+```
+
+Add a source filter: `local` or `outlook`
+
+```
+/events today local
+/events week outlook
+```
+
+The reply shows `[L]` for local and `[O]` for Outlook, with each item’s `id` (useful for edits).
+
+### Add / Edit / Rename / Delete (Local) — `/cal ...`
+
+```
+/cal add "Title" 2025-09-24T15:00..2025-09-24T16:00 loc:"HQ" notes:"Standup"
+# optional flags: loc:"…" | notes:"…" | tz:"America/Chicago"
+
+# rename by id (from /events list)
+ /cal rename <id> "New title"
+
+# move/update times
+ /cal move <id> 2025-09-24T17:00..2025-09-24T18:00
+# (alias: /cal edit <id> ...)
+
+# delete
+ /cal delete <id>
+```
+
+Every local change dispatches a `window` event `calendar:changed` so the Calendar tile updates instantly.
 
 ---
 
 ## API Endpoints
 
-* `GET /api/health` → `{ok, ollama, active}`
+*(unchanged ones omitted for brevity)*
 
-* `GET /api/models` → `{active, models:[{name, family, size, modified_at}]}`
+**Calendar (server):**
 
-* `POST /api/models/select` → body `{name}`
-
-* `POST /api/models/refresh` → resync
-
-* `POST /api/chat` → `{messages:[{role,content}], system, model}` → `{reply}`
-
-* `GET /api/summary?url=&model=` → `{title, url, summary}`
-
-* `GET /api/research?q=&model=` → `{answer, sources:[{label,title,url}], model}`
-
-* `GET /api/rss` → `{feeds:[{feed,items:[{title,link,pubDate}]}]}`
-
-* `POST /api/tts` → body `{text, voice}` → **audio/wav** bytes
-
-* `POST /api/stt` → multipart with `audio: File(webm)` → `{text}`
-
-* `POST /api/memory` → `{userId, action:'get'|'set'|'delete', key?, value?}`
+* `GET /calendar/status` → `{ connected:boolean, me?:object }`
+* `GET /calendar/upcoming?from&to&tz` → array of Outlook events
+* `POST /calendar/upsert` → `{ eventId, webLink }` (creates Outlook event from a local task)
+* `DELETE /calendar/:eventId` → `{ ok:true }`
+* `GET /calendar/connect` → starts OAuth
+* `GET /oauth/callback` → finishes OAuth, stores session
+* `POST /auth/logout` → clears session
 
 ---
 
 ## Troubleshooting
 
-### “Something went wrong in the UI” / ErrorBoundary shows `saveRole` or `onRefreshModels is not defined`
+### Calendar
 
-You’re on an older `App.jsx`. Use the version above — it **defines** `saveRole`, `onSelectModel`, and `onRefreshModels` before rendering.
+**“Set MS\_CLIENT\_ID in env”**
+You hit `/calendar/connect` but `server/.env` is missing `MS_CLIENT_ID`. Add it and restart the server.
 
-### Page is blank / black
+**“Cannot GET /calendar/connect”**
+You opened `http://localhost:5173/calendar/connect` (client). Open the **server** origin: `http://localhost:3000/calendar/connect`, or configure the Vite **proxy** as shown.
 
-Open DevTools → Console. Any reference error (undefined function/variable) in React will fail the render. The provided `App.jsx` addresses earlier crashes and dedupes chat IDs so keys are stable.
+**`/calendar/status` 404 from `:5173`**
+Add the proxy for `/calendar` and `/oauth` in `vite.config.js` or call absolute server URLs (`VITE_API_ORIGIN`).
 
-### TTS fails (`piper` not found / WAV not produced)
+**OAuth state/cookies not sticking**
+Cross-origin cookies may be blocked if not Secure. Use the **proxy** during dev. If you must stay cross-origin, run the server under HTTPS so `SameSite=None; Secure` cookies are accepted.
 
-* Confirm the Python venv and `piper-tts` are installed, and `VENV_PY` points to your venv Python when starting the server:
+**401 unauthorized listing Outlook**
+Session expired. Hit **Connect** again or `POST /auth/logout`, then re-connect.
 
-  ```bash
-  VENV_PY="$(cd .. && pwd)/.venv/bin/python" node server.js
-  ```
-* Ensure voices exist under `server/piper/voices/` and your **voice name** in `App.jsx` matches a real file.
+### General
 
-### STT fails (`vosk` / ffmpeg)
+**TTS / STT issues**
+See original sections; confirm venv Python path via `VENV_PY=... node server.js`.
 
-* `ffmpeg` is bundled via `ffmpeg-static` in Node, but make sure the webm → wav step works (the server logs errors).
-* Python side needs: `vosk`, `soundfile`, `numpy`, and the **model folder** in `server/models/vosk/vosk-model-small-en-us-0.15/`.
-
-### Ollama not reachable
-
-* `ollama serve` should be running.
-* Use `OLLAMA_URL` if not on default port / remote host.
-* Pull at least one instruct model: `ollama pull qwen2.5:14b-instruct`.
-
-### macOS “quarantine” / exec perms for native Piper binaries
-
-You’re using the Python wheel which avoids binary dylib pain. If you later switch to a native Piper binary, you may need:
-
-```bash
-chmod -R a+x server/piper
-xattr -dr com.apple.quarantine server/piper
-```
-
-For x86\_64 binaries on Apple Silicon, install **Rosetta** and use `arch -x86_64` — but prefer the Python wheel to avoid this.
+**Favicon 404**
+Optional. Add `client/public/favicon.ico` or ignore.
 
 ---
 
 ## Next Steps & Notes
 
-* **Voice picker in UI**: surface available `*.onnx` from server and let the user pick the current voice.
-* **Streaming TTS**: stream WAV chunks for lower latency.
-* **Streaming chat**: support streaming tokens from Ollama.
-* **Memory UX**: add a small “Save to memory” panel wired to `/api/memory`.
-* **More languages**: drop in other Vosk models and voices.
+* Voice picker in UI, streaming TTS, streaming chat.
+* More calendar sources (Google, iCal).
+* Server memory UX.
 
 ---
 
-### One-liner run (after first setup)
+### One-liner run after setup
 
 ```bash
-# Terminal A
-# from your current prompt in .../Xenya-3/client
+# Terminal A — server
 cd server
-npm i express-session nanoid
-
-# (optional) create the Python venv at project root if you haven’t already
-[ -d ../.venv ] || python3 -m venv ../.venv
-source ../.venv/bin/activate
-pip install -U pip vosk soundfile piper-tts
-
-# quick sanity checks (these files/dirs must exist)
-ls -1 stt_py.py
-ls -1 models/vosk/vosk-model-small-en-us-0.15/am
-
-# run the server and tell it which Python to use for STT
 VENV_PY="$(cd .. && pwd)/.venv/bin/python" node server.js
 
-
-# Terminal B
-cd client
+# Terminal B — client
+cd ../client
 npm run dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) — pick a model, talk to Xenya, and enjoy the voice loop.
+Open [http://localhost:5173](http://localhost:5173) → Calendar tile → **Connect** (or browse to [http://localhost:3000/calendar/connect](http://localhost:3000/calendar/connect)).
