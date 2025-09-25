@@ -2,6 +2,6 @@
   "users": {},
   "notes": [],
   "config": {
-    "activeModel": "deepseek-r1:14b"
+    "activeModel": "llama3.2:latest"
   }
 }

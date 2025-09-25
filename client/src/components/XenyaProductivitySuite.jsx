@@ -44,6 +44,16 @@ const ToolRegistry = {
     defaultTall: false,
     defaultProps: { embedded: true },
   },
+    capture: {
+    id: "capture",
+    title: "Quick Capture • History",
+    Comp: lazy(() => import("./CaptureCenter.jsx")),
+    defaultVisible: true,
+    defaultWide: false,
+    defaultTall: false,
+    defaultProps: { embedded: true },
+  },
+
 };
 
 function useLocalState() {

@@ -54,7 +54,9 @@ export default function Notes(){
         <div className="notes-title">
           <span className="notes-eye" />
           <strong>Notes</strong>
-          <span className="notes-sub">Xenya MVP • Offline Speak & Listen • Productivity • Focus Timer &amp; Pomodoro • Outlook Calendar</span>
+          <span className="notes-sub">
+            Xenya MVP • Offline Speak &amp; Listen • Productivity • Focus Timer &amp; Pomodoro • Outlook Calendar • Quick Capture
+          </span>
         </div>
         <div className="notes-actions">
           <button className="notes-btn" onClick={()=>setOpen(false)} title="Minimize">—</button>
@@ -69,6 +71,58 @@ export default function Notes(){
             <li>Run the client (<code>npm run dev</code> in <code>client/</code>).</li>
             <li>Pick a model in the sidebar, then type or use the <strong>Mic</strong>.</li>
           </ul>
+        </section>
+
+        {/* ===== NEW: Quick Capture + Capture Center ===== */}
+        <section>
+          <h4>Quick Capture + Capture Center</h4>
+          <ul>
+            <li><strong>Open Quick Capture anywhere</strong>:
+              <ul>
+                <li>Keyboard: <kbd>⌘/Ctrl</kbd>+<kbd>J</kbd></li>
+                <li>Dock button: <em>✚ Quick Capture</em> (top-right floating dock)</li>
+                <li>Programmatic: <code>window.dispatchEvent(new CustomEvent('capture:open'))</code></li>
+              </ul>
+            </li>
+            <li><strong>Targets &amp; syntax</strong>:
+              <ul>
+                <li><code>t:</code> tasks &nbsp;•&nbsp; <code>n:</code> notes &nbsp;•&nbsp; <code>r:</code> read-later</li>
+                <li>Use <code>#tags</code> anywhere; they become <em>flags</em> on the created task.</li>
+                <li><strong>Save</strong>: <kbd>⌘/Ctrl</kbd>+<kbd>Enter</kbd> &nbsp;•&nbsp; <strong>Close</strong>: <kbd>Esc</kbd></li>
+              </ul>
+            </li>
+            <li><strong>Where it goes</strong>: every capture creates a <em>Mini-Kanban</em> task in <code>INBOX</code>.
+              <ul>
+                <li><code>n:</code> adds a <code>note</code> flag; <code>r:</code> adds a <code>readlater</code> flag.</li>
+                <li>URLs are auto-detected; the text is still the task title.</li>
+              </ul>
+            </li>
+            <li><strong>Capture Center (tile)</strong> — manage your history from the dock:
+              <ul>
+                <li>Open the <em>Productivity Suite</em> and show the tile <strong>“Quick Capture • History”</strong>.</li>
+                <li>Filter: <em>All / Tasks / Notes / Read-Later</em>, search by text or <code>#tag</code>.</li>
+                <li><strong>Read-Later</strong> items with links show an <em>Open Link</em> action (opens in a new tab).</li>
+                <li>Actions: <em>Copy</em>, <em>Delete item</em>, and <em>Clear All</em> history.</li>
+                <li><em>New</em> button launches the overlay immediately (same as ⌘/Ctrl+J).</li>
+              </ul>
+            </li>
+          </ul>
+
+          <details open>
+            <summary><strong>Storage (for reference)</strong></summary>
+            <ul className="small mono" style={{marginTop:6}}>
+              <li><code>xenya.captures.v1</code> — Quick Capture history for the Capture Center tile.</li>
+              <li><code>xenya.kanban.v1</code> — Tasks created from Quick Capture (col, flags, colors, etc.).</li>
+            </ul>
+          </details>
+
+          <details>
+            <summary><strong>Tips</strong></summary>
+            <ul>
+              <li>Use tags like <code>#p1</code> / <code>#p2</code> to prioritize; filter by flag inside Mini-Kanban.</li>
+              <li>For read-later, paste the URL after <code>r:</code> (e.g., <code>r: https://… #reading</code>) to get the open-in-new-tab action in the tile.</li>
+            </ul>
+          </details>
         </section>
 
         {/* ===== NEW: Focus Timer & Pomodoro ===== */}
@@ -241,7 +295,8 @@ VENV_PY="$(cd .. && pwd)/.venv/bin/python" node --env-file=.env server.js</pre>
         <section>
           <h4>Action Dock</h4>
           <ul>
-            <li>Top-right floating controls: <em>✦ Notes</em> and <em>⚡ Productivity</em>.</li>
+            <li>Top-right floating controls: <em>✚ Quick Capture</em>, <em>✦ Notes</em>, and <em>⚡ Productivity</em>.</li>
+            <li>Keyboard shortcut for Quick Capture: <kbd>⌘/Ctrl</kbd>+<kbd>J</kbd>.</li>
             <li>Use the small circle toggle to <strong>hide/show</strong> the dock. While Productivity is open, the dock auto-hides to prevent overlap.</li>
             <li>Open Productivity via UI or type <code>/productivity</code>, <code>/prod</code>, or <code>/kanban</code>.</li>
           </ul>
@@ -307,6 +362,9 @@ VENV_PY="$(cd .. && pwd)/.venv/bin/python" node --env-file=.env server.js</pre>
             <li><code>server/server.js</code>: API for chat/search/summary/rss + <code>/api/tts</code> + <code>/api/stt</code> + mounts calendar routes.</li>
             <li><code>server/calendar.js</code>: Outlook OAuth + Graph (<code>/calendar/*</code>).</li>
             <li><code>client/src/components/OutlookCalender.jsx</code>: Calendar UI (List/Week/Month, responsive/fit-to-screen).</li>
+            <li><code>client/src/components/QuickCapture.jsx</code>: Global overlay for rapid capture.</li>
+            <li><code>client/src/components/CaptureCenter.jsx</code>: Dock tile for history + open-link.</li>
+            <li><code>client/src/components/MiniKanban.jsx</code>: Tasks (Inbox/Doing/Done), flags/colors.</li>
             <li><code>client/src/App.jsx</code>: Chat router (includes calendar and timer/pomodoro slash-commands).</li>
             <li><code>client/src/components/Mic.jsx</code> &amp; <code>server/stt_py.py</code>: STT.</li>
             <li><code>client/src/lib/tts/speak.js</code> &amp; <code>server/tts.js</code>: TTS.</li>

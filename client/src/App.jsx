@@ -9,6 +9,7 @@ import Logo from './components/Logo.jsx'
 import ChatBox from './components/ChatBox.jsx'   // compact composer (Talk + Send)
 import XenyaProductivitySuite from "./components/XenyaProductivitySuite.jsx";
 import { addKanbanTask, moveKanbanTaskByTitle } from './components/MiniKanban.jsx'  // Kanban helper APIs
+import QuickCapture from './components/QuickCapture.jsx';
 
 /* ---------- Tone & Microcopy ---------- */
 const TONE = {
@@ -1101,6 +1102,8 @@ Tip: use /events week local to see ids.` })
   /* -------- UI -------- */
   return (
     <div className="shell">
+      {/* Global Quick Capture overlay (⌘/Ctrl+J) */}
+      <QuickCapture />
       {/* Notes still mounts; its original FAB is hidden by the effect above */}
       <Notes/>
 
