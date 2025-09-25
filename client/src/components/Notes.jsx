@@ -54,7 +54,7 @@ export default function Notes(){
         <div className="notes-title">
           <span className="notes-eye" />
           <strong>Notes</strong>
-          <span className="notes-sub">Xenya MVP • Offline Speak & Listen • Productivity • Outlook Calendar</span>
+          <span className="notes-sub">Xenya MVP • Offline Speak & Listen • Productivity • Focus Timer &amp; Pomodoro • Outlook Calendar</span>
         </div>
         <div className="notes-actions">
           <button className="notes-btn" onClick={()=>setOpen(false)} title="Minimize">—</button>
@@ -69,6 +69,74 @@ export default function Notes(){
             <li>Run the client (<code>npm run dev</code> in <code>client/</code>).</li>
             <li>Pick a model in the sidebar, then type or use the <strong>Mic</strong>.</li>
           </ul>
+        </section>
+
+        {/* ===== NEW: Focus Timer & Pomodoro ===== */}
+        <section>
+          <h4>Focus Timer &amp; Pomodoro</h4>
+          <ul>
+            <li>Open via the Dock (<em>⚡ Productivity</em>). The tile is responsive: scroll inside it if the window is compact, or maximize (▣) for a bigger canvas.</li>
+            <li><strong>Modes</strong>:
+              <ul>
+                <li><em>Timer</em> — a simple countdown (attention-grabbing end sound).</li>
+                <li><em>Pomodoro</em> — cycles of Focus/Break with presets, gentle phase sounds, optional ambience themes.</li>
+              </ul>
+            </li>
+            <li><strong>Presets</strong>: Classic 25/5 ×4, Study 50/10, Balanced 45/15, Ultra 90/20.</li>
+            <li><strong>Custom</strong>: set Focus, Short/Long break minutes and “Long every N” cycles; enable auto-cycle.</li>
+            <li><strong>Sounds</strong>:
+              <ul>
+                <li>Timer end: choose an attention-seeking sound (<em>alarm/buzzer/bell</em>).</li>
+                <li>Pomodoro phase end: gentle sounds (<em>chime/woodblock/bell</em>).</li>
+                <li>Ambience (Pomodoro): <em>Café</em>, <em>Piano/Guitar</em>, <em>Beach</em>, <em>Rain</em>, <em>Fireplace</em>; toggle per phase (focus/break/both) and volume.</li>
+              </ul>
+            </li>
+            <li><strong>Kanban link</strong>: link the session to a task from Mini Kanban (<em>Inbox</em> or <em>Doing</em>) so the title shows on the timer.</li>
+          </ul>
+
+          <details open>
+            <summary><strong>Chat commands (quick)</strong></summary>
+            <div className="mono small" style={{marginTop:6, lineHeight:1.6}}>
+              {/* Timer */}
+              <div><strong>Timer</strong></div>
+              /timer start 20<br/>
+              /timer pause · /timer resume · /timer stop · /timer status<br/>
+              /timer sound alarm<br/>
+              /timer open
+              <br/><br/>
+              {/* Pomodoro */}
+              <div><strong>Pomodoro</strong></div>
+              /pomodoro start focus<br/>
+              /pomodoro break short &nbsp;|&nbsp; /pomodoro break long<br/>
+              /pomodoro preset classic &nbsp;|&nbsp; study &nbsp;|&nbsp; balanced &nbsp;|&nbsp; ultra<br/>
+              /pomodoro set focus=45 break=10 long=20 every=3 auto=on<br/>
+              /pomodoro sound chime<br/>
+              /pomodoro ambience cafe on vol=60 where=focus<br/>
+              /pomodoro link "read chapter" doing<br/>
+              /pomodoro stop &nbsp;|&nbsp; /pomodoro status &nbsp;|&nbsp; /pomodoro open
+            </div>
+          </details>
+
+          <details>
+            <summary><strong>What the commands do</strong></summary>
+            <ul>
+              <li><code>/timer start [m]</code> — starts a simple countdown (default = saved minutes). <code>pause/resume/stop/status</code> manage it. <code>sound &lt;alarm|buzzer|bell|none&gt;</code> sets the end sound.</li>
+              <li><code>/pomodoro start</code> — begins a Focus session using your current preset. Use <code>break short|long</code> to jump to a break.</li>
+              <li><code>preset</code> and <code>set</code> update cycle lengths; <code>auto</code> toggles auto-advance between phases.</li>
+              <li><code>sound &lt;chime|woodblock|bell|none&gt;</code> selects a gentle phase-end sound.</li>
+              <li><code>ambience</code> picks a background theme; optional <code>on|off</code>, <code>vol=0..100</code>, and <code>where=focus|break|both</code>.</li>
+              <li><code>link "substring" inbox|doing</code> links the timer to the first matching Kanban task in that column.</li>
+              <li><code>open</code> pops the Productivity Suite so you can see the timer immediately.</li>
+            </ul>
+          </details>
+
+          <details>
+            <summary><strong>Storage keys (for reference)</strong></summary>
+            <ul className="small mono">
+              <li><code>xenya.timer.v1</code> — running state (mode, timestamps, link, remaining).</li>
+              <li><code>xenya.timer.v1.cfg</code> — preferences (sounds, durations, ambience).</li>
+            </ul>
+          </details>
         </section>
 
         {/* ===== NEW: Calendar via Chat ===== */}
@@ -95,13 +163,13 @@ export default function Notes(){
           <details>
             <summary><strong>Add / Edit / Rename / Delete (Local)</strong> — <code>/cal …</code></summary>
             <ul>
-              <li><strong>Add</strong>: <code>/cal add "Title" YYYY-MM-DD HH:MM HH:MM | Location</code></li>
-              <li><strong>Edit</strong>: <code>/cal edit "Title" YYYY-MM-DD HH:MM HH:MM | New Location</code> <span className="small">(edits the first title match)</span></li>
-              <li><strong>Rename</strong>: <code>/cal rename "Old" -&gt; "New"</code></li>
-              <li><strong>Delete</strong>: <code>/cal del "Title"</code> <span className="small">(deletes <em>all</em> local items with that title)</span></li>
+              <li><strong>Add</strong>: <code>/cal add "Title" 2025-09-24T15:00..2025-09-24T16:00 loc:"HQ" notes:"Standup"</code></li>
+              <li><strong>Rename</strong>: <code>/cal rename &lt;id&gt; "New title"</code></li>
+              <li><strong>Move</strong>: <code>/cal move &lt;id&gt; 2025-09-24T17:00..2025-09-24T18:00</code></li>
+              <li><strong>Delete</strong>: <code>/cal delete &lt;id&gt;</code></li>
             </ul>
             <p className="small" style={{opacity:.9, marginTop:6}}>
-              Times support <code>17:30</code> or <code>5:30pm</code>. Titles are matched case-insensitively. These commands only affect <strong>Local</strong> events; to publish to Outlook, use the <em>Push</em> button beside the item in the Calendar tile.
+              Use <code>/events</code> to see ids. These commands change <strong>Local</strong> items; push to Outlook from the Calendar tile UI.
             </p>
           </details>
 
@@ -239,7 +307,7 @@ VENV_PY="$(cd .. && pwd)/.venv/bin/python" node --env-file=.env server.js</pre>
             <li><code>server/server.js</code>: API for chat/search/summary/rss + <code>/api/tts</code> + <code>/api/stt</code> + mounts calendar routes.</li>
             <li><code>server/calendar.js</code>: Outlook OAuth + Graph (<code>/calendar/*</code>).</li>
             <li><code>client/src/components/OutlookCalender.jsx</code>: Calendar UI (List/Week/Month, responsive/fit-to-screen).</li>
-            <li><code>client/src/App.jsx</code>: Chat router (includes calendar slash-commands).</li>
+            <li><code>client/src/App.jsx</code>: Chat router (includes calendar and timer/pomodoro slash-commands).</li>
             <li><code>client/src/components/Mic.jsx</code> &amp; <code>server/stt_py.py</code>: STT.</li>
             <li><code>client/src/lib/tts/speak.js</code> &amp; <code>server/tts.js</code>: TTS.</li>
           </ul>

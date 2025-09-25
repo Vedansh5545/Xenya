@@ -417,6 +417,26 @@ export default function App(){
     [chats, activeId]
   )
 
+  // ------------- Timer/Pomodoro storage helpers (shared with FocusTimer) -------------
+  const TIMER_LS_STATE = 'xenya.timer.v1'
+  const TIMER_LS_CFG   = 'xenya.timer.v1.cfg'
+  const KANBAN_LS      = 'xenya.kanban.v1'
+  const nowMs = () => Date.now()
+  const readJSON = (k, f) => { try{ const raw = localStorage.getItem(k); if(raw) return JSON.parse(raw) }catch{} return typeof f==='function'? f(): (f||{}) }
+  const writeJSON = (k, v) => { try{ localStorage.setItem(k, JSON.stringify(v)) }catch{} }
+  const timerCfg = () => readJSON(TIMER_LS_CFG, {})
+  const setTimerCfg = (patch) => { const next = { ...timerCfg(), ...patch }; writeJSON(TIMER_LS_CFG, next); return next }
+  const timerState = () => readJSON(TIMER_LS_STATE, { running:false, mode:'idle', totalMs:0, remainingMs:0 })
+  const setTimerState = (patch) => { const next = { ...timerState(), ...patch }; writeJSON(TIMER_LS_STATE, next); return next }
+  const readKanban = () => { try{ const db = JSON.parse(localStorage.getItem(KANBAN_LS))||{tasks:[]}; return Array.isArray(db.tasks)? db.tasks:[] }catch{ return [] } }
+
+  // “Bounce” (remount) the Productivity Suite so the FocusTimer picks up external state changes immediately
+  const bounceProductivity = () => {
+    if (!kanbanOpen) { setKanbanOpen(true); return }
+    setKanbanOpen(false)
+    setTimeout(()=>setKanbanOpen(true), 60)
+  }
+
   // boot: fetch models
   useEffect(()=>{ (async ()=>{
     try { const r = await listModels(); setModels(r.models||[]); setActiveModel(r.active||'') } catch(e){ console.error(e) }
@@ -475,6 +495,7 @@ export default function App(){
   const titleFromFirstUser = (chat) => {
     const first = chat?.messages?.find(m=>m.role==='user')?.content || 'New chat'
     return first.length>28 ? first.slice(0,28)+'…' : first
+
   }
 
   // toast
@@ -582,6 +603,234 @@ export default function App(){
       saveChats(next)
       return next
     })
+
+    /* ---------- TIMER / POMODORO chat commands ---------- */
+    if (/^\/timer\b/i.test(content) || /^\/pomodoro\b/i.test(content)) {
+      const reply = (s) => {
+        const aMsg = { role:'assistant', content: s }
+        setChats(prev=>{
+          const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
+          const next = prev.map(c => c.id===activeId ? { ...c, title:titled, messages:[...c.messages, aMsg] } : c)
+          saveChats(next); return next
+        })
+      }
+
+      // ---- helpers
+      const helpTimer = () => reply(
+`**Timer commands**
+- /timer start [minutes]
+- /timer pause • /timer resume • /timer stop • /timer status
+- /timer sound <alarm|buzzer|bell|none>
+- /timer open`)
+
+      const helpPom = () => reply(
+`**Pomodoro commands**
+- /pomodoro start [focus|break|short|long]
+- /pomodoro break [short|long] • /pomodoro stop
+- /pomodoro preset <classic|study|balanced|ultra>
+- /pomodoro set focus=<m> break=<m> long=<m> every=<n> auto=<on|off>
+- /pomodoro sound <chime|woodblock|bell|none>
+- /pomodoro ambience <cafe|pianoguitar|beach|rain|fireplace> [on|off] [vol=<0-100>] [where=<focus|break|both>]
+- /pomodoro link "<task substring>" [inbox|doing]
+- /pomodoro open`)
+
+      // timer primitives (writes LS; FocusTimer picks up on mount/remount)
+      const startSimple = (mins) => {
+        const m = Math.max(1, Math.round(mins || timerCfg().simpleM || 20))
+        const startAt = nowMs()
+        const total = m * 60_000
+        setTimerCfg({ mode:'timer', simpleM:m })  // remember choice
+        setTimerState({
+          running:true, mode:'simple', totalMs: total, remainingMs: total,
+          startAt, endAt: startAt + total, linked: timerState().linked || null
+        })
+        bounceProductivity()
+        reply(`⏱️ Timer started for **${m} min**.`)
+      }
+      const pauseSimpleOrPom = () => {
+        const s = timerState()
+        if (!s.running || !s.endAt) return reply('Timer is not running.')
+        const left = Math.max(0, s.endAt - nowMs())
+        setTimerState({ running:false, endAt:null, remainingMs:left })
+        bounceProductivity()
+        reply(`⏸ Paused — **${Math.round(left/60000)} min** remaining.`)
+      }
+      const resumeSimpleOrPom = () => {
+        const s = timerState()
+        if (s.running || !s.remainingMs) return reply('Nothing to resume.')
+        const endAt = nowMs() + s.remainingMs
+        setTimerState({ running:true, endAt })
+        bounceProductivity()
+        reply(`▶︎ Resumed — **${fmt(s.remainingMs)}** left.`)
+      }
+      const stopAny = () => {
+        setTimerState({ running:false, mode:'idle', totalMs:0, remainingMs:0, startAt:null, endAt:null })
+        bounceProductivity()
+        reply('■ Stopped.')
+      }
+      const statusAny = () => {
+        const s = timerState()
+        if (s.mode === 'idle' || (!s.running && !s.remainingMs)) return reply('No active timer.')
+        const left = s.running ? Math.max(0, (s.endAt||0) - nowMs()) : (s.remainingMs||0)
+        const label = s.mode === 'simple' ? 'Timer' : (s.mode === 'focus' ? 'Focus' : 'Break')
+        reply(`${label}: **${fmt(left)}** ${s.running ? 'left' : '(paused)'}.`)
+      }
+
+      const startFocus = () => {
+        const cfg = setTimerCfg({ mode:'pomodoro' })
+        const mins = cfg.focusM || 25
+        const startAt = nowMs()
+        const total = mins * 60_000
+        setTimerState({
+          running:true, mode:'focus', breakType:'short',
+          totalMs: total, remainingMs: total, startAt, endAt: startAt + total
+        })
+        bounceProductivity()
+        reply(`🍅 Focus started for **${mins} min**.`)
+      }
+      const startBreak = (kind='short') => {
+        const cfg = setTimerCfg({ mode:'pomodoro' })
+        const mins = (kind==='long' ? cfg.longBreakM : cfg.shortBreakM) || (kind==='long'?15:5)
+        const startAt = nowMs()
+        const total = mins * 60_000
+        setTimerState({
+          running:true, mode:'break', breakType: kind,
+          totalMs: total, remainingMs: total, startAt, endAt: startAt + total
+        })
+        bounceProductivity()
+        reply(`🍃 ${kind==='long'?'Long ':''}Break started for **${mins} min**.`)
+      }
+
+      // ---- parse
+      if (/^\/timer\b/i.test(content)) {
+        const s = content.replace(/^\/timer\s*/i,'').trim()
+
+        if (s === '' || /^help$/i.test(s)) return helpTimer()
+
+        // open
+        if (/^open$/i.test(s)) { setKanbanOpen(true); return reply('Opened Productivity Suite.'); }
+
+        // sound
+        let m = s.match(/^sound\s+(alarm|buzzer|bell|none)$/i)
+        if (m) { const choice = m[1].toLowerCase(); setTimerCfg({ timerEndSound: choice })
+          return reply(`🔔 Timer end sound → **${choice}**`) }
+
+        // start [minutes]
+        m = s.match(/^start(?:\s+(\d+))?$/i)
+        if (m) { const mins = m[1] ? parseInt(m[1],10) : undefined; return startSimple(mins) }
+
+        if (/^pause$/i.test(s)) return pauseSimpleOrPom()
+        if (/^resume$/i.test(s)) return resumeSimpleOrPom()
+        if (/^stop$/i.test(s)) return stopAny()
+        if (/^status$/i.test(s)) return statusAny()
+
+        return helpTimer()
+      }
+
+      if (/^\/pomodoro\b/i.test(content)) {
+        const s = content.replace(/^\/pomodoro\s*/i,'').trim()
+
+        if (s === '' || /^help$/i.test(s)) return helpPom()
+
+        // open
+        if (/^open$/i.test(s)) { setKanbanOpen(true); return reply('Opened Productivity Suite.'); }
+
+        // presets
+        let m = s.match(/^preset\s+(classic|study|balanced|ultra)$/i)
+        if (m) {
+          const p = m[1].toLowerCase()
+          const presets = {
+            classic:  { focusM:25, shortBreakM:5,  longBreakM:15, longEvery:4 },
+            study:    { focusM:50, shortBreakM:10, longBreakM:20, longEvery:3 },
+            balanced: { focusM:45, shortBreakM:15, longBreakM:20, longEvery:4 },
+            ultra:    { focusM:90, shortBreakM:20, longBreakM:30, longEvery:2 }
+          }
+          setTimerCfg({ ...presets[p], mode:'pomodoro' })
+          bounceProductivity()
+          return reply(`Preset **${p}** loaded.`)
+        }
+
+        // set focus=.. break=.. long=.. every=.. auto=on|off
+        m = s.match(/^set\s+(.+)$/i)
+        if (m) {
+          const args = m[1]
+          const kv = {}
+          ;(args.match(/\b(focus|break|long|every|auto)=(\S+)/gi) || []).forEach(pair=>{
+            const mm = pair.match(/\b(focus|break|long|every|auto)=(\S+)/i)
+            if (!mm) return
+            const key = mm[1].toLowerCase(), val = mm[2]
+            if (key==='auto') kv.autoCycle = /^(on|true|1)$/i.test(val)
+            else if (key==='every') kv.longEvery = clampSafeInt(val, 2, 8)
+            else if (key==='focus') kv.focusM = clampSafeInt(val, 1, 180)
+            else if (key==='break') kv.shortBreakM = clampSafeInt(val, 1, 60)
+            else if (key==='long') kv.longBreakM = clampSafeInt(val, 1, 90)
+          })
+          setTimerCfg({ mode:'pomodoro', ...kv })
+          bounceProductivity()
+          return reply(`Pomodoro settings updated.`)
+        }
+
+        // sound
+        m = s.match(/^sound\s+(chime|woodblock|bell|none)$/i)
+        if (m) { const choice = m[1].toLowerCase(); setTimerCfg({ pomodoroEndSound: choice })
+          return reply(`🔔 Pomodoro end sound → **${choice}**`) }
+
+        // ambience
+        m = s.match(/^ambience\s+(cafe|pianoguitar|beach|rain|fireplace)(?:\s+(on|off))?(?:\s+vol=(\d{1,3}))?(?:\s+where=(focus|break|both))?$/i)
+        if (m) {
+          const type = m[1].toLowerCase()
+          const onoff = (m[2]||'').toLowerCase()
+          const volNum = m[3] ? Math.min(100, Math.max(0, parseInt(m[3],10))) : null
+          const where = (m[4]||'').toLowerCase()
+          const patch = { mode:'pomodoro', ambientType: type }
+          if (onoff) patch.ambientEnabled = onoff === 'on'
+          if (volNum !== null) patch.ambientVolume = volNum / 100
+          if (where) {
+            patch.ambientOnFocus = (where==='focus' || where==='both')
+            patch.ambientOnBreak = (where==='break' || where==='both')
+          }
+          setTimerCfg(patch)
+          bounceProductivity()
+          return reply(`🎧 Ambience **${type}**${onoff?` (${onoff})`:''}${volNum!==null?` · vol ${volNum}%`:''}${where?` · ${where}`:''}.`)
+        }
+
+        // link "<substring>" [inbox|doing]
+        m = s.match(/^link\s+["“](.+?)["”](?:\s+(inbox|doing))?$/i)
+        if (m) {
+          const substr = m[1].toLowerCase()
+          const col = (m[2] || 'doing').toLowerCase()
+          const t = readKanban().find(x => x && (x.col===col) && String(x.title||'').toLowerCase().includes(substr))
+          if (t) {
+            setTimerState({ linked: { id: t.id, title: t.title } })
+            bounceProductivity()
+            return reply(`🔗 Linked task: **${t.title}** (${col.toUpperCase()})`)
+          }
+          return reply(`No task matching “${m[1]}” in ${col}.`)
+        }
+
+        // start [focus|break|short|long]
+        m = s.match(/^start(?:\s+(focus|break|short|long))?$/i)
+        if (m) {
+          const kind = (m[1]||'focus').toLowerCase()
+          if (kind==='focus') return startFocus()
+          if (kind==='break' || kind==='short') return startBreak('short')
+          if (kind==='long') return startBreak('long')
+        }
+
+        // explicit break command
+        m = s.match(/^break(?:\s+(short|long))?$/i)
+        if (m) { return startBreak((m[1]||'short').toLowerCase()) }
+
+        if (/^pause$/i.test(s)) return pauseSimpleOrPom()
+        if (/^resume$/i.test(s)) return resumeSimpleOrPom()
+        if (/^stop$/i.test(s)) return stopAny()
+        if (/^status$/i.test(s)) return statusAny()
+
+        return helpPom()
+      }
+
+      return
+    }
 
     /* ---------- Calendar: /events ---------- */
     if (/^\/events\b/i.test(content)) {
@@ -801,6 +1050,12 @@ Tip: use /events week local to see ids.` })
       setBusy(false); setJustDone(true)
       setTimeout(()=>setJustDone(false), 350)
     }
+  }
+
+  const clampSafeInt = (v, min, max) => {
+    const n = parseInt(String(v).replace(/[^\d-]/g,''), 10)
+    if (Number.isFinite(n)) return Math.max(min, Math.min(max, n))
+    return min
   }
 
   const send = async () => { if (!input.trim()) return; await sendFromText(input) }
