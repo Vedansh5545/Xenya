@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 /**
  * XenyaProductivitySuite.jsx
- * - Pluggable tools (Kanban, Outlook Calendar, etc.)
+ * - Pluggable tools (Kanban, Outlook Calendar, Timer, etc.)
  * - Drag to reorder
  * - Minimize / Restore / Maximize
  * - Per-tile Resize (width: 1/2 cols, height: 1/2 rows)
@@ -12,7 +12,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
  * - Layout persisted in localStorage
  */
 
-const LS_KEY = "xenya.ps.v2"; // bump version to introduce "tall" + "fullscreen"
+const LS_KEY = "xenya.ps.v2"; // keep version; upgrade logic below adds new tools safely
 
 // Lazy tools
 const ToolRegistry = {
@@ -34,7 +34,16 @@ const ToolRegistry = {
     defaultTall: false,
     defaultProps: { embed: true },
   },
-  // Add more tools here later…
+  // NEW: Focus / Pomodoro Timer tile
+  timer: {
+    id: "timer",
+    title: "Timer",
+    Comp: lazy(() => import("./FocusTimer.jsx")),
+    defaultVisible: true,      // show by default like Kanban + Calendar
+    defaultWide: false,        // timer is comfy as a single column tile
+    defaultTall: false,
+    defaultProps: { embedded: true },
+  },
 };
 
 function useLocalState() {
@@ -42,13 +51,36 @@ function useLocalState() {
     try {
       const raw = localStorage.getItem(LS_KEY);
       if (raw) {
-        const p = JSON.parse(raw);
-        // upgrade path: allow v1 states
+        const p = JSON.parse(raw) || {};
+
+        // --- Upgrade path: ensure newly added default-visible tools appear
+        const visible = new Set(p.visible || []);
+        const order = Array.isArray(p.order) ? [...p.order] : [];
+        const wide  = new Set(p.wide || []);
+        const tall  = new Set(p.tall || []);
+
+        for (const t of Object.values(ToolRegistry)) {
+          const id = t.id;
+          const inOrder = order.includes(id);
+
+          // If a tool is defaultVisible and isn't in saved visible set, add it.
+          if (t.defaultVisible && !visible.has(id)) visible.add(id);
+
+          // Ensure every known tool has a place in order (append to end if missing).
+          if (!inOrder) order.push(id);
+
+          // For *new* tools (not in original order array), seed their wide/tall defaults.
+          if (!p.order || !p.order.includes(id)) {
+            if (t.defaultWide) wide.add(id);
+            if (t.defaultTall) tall.add(id);
+          }
+        }
+
         return {
-          visible    : new Set(p.visible    || Object.values(ToolRegistry).filter(t=>t.defaultVisible).map(t=>t.id)),
-          order      : p.order              || Object.values(ToolRegistry).filter(t=>t.defaultVisible).map(t=>t.id),
-          wide       : new Set(p.wide       || Object.values(ToolRegistry).filter(t=>t.defaultWide).map(t=>t.id)),
-          tall       : new Set(p.tall       || Object.values(ToolRegistry).filter(t=>t.defaultTall).map(t=>t.id)),
+          visible,
+          order,
+          wide,
+          tall,
           minimized  : new Set(p.minimized  || []),
           maximizedId: p.maximizedId        || null,
           locked     : !!p.locked,
@@ -56,10 +88,12 @@ function useLocalState() {
         };
       }
     } catch {}
+
+    // Fresh defaults
     const defaults = Object.values(ToolRegistry).filter(t => t.defaultVisible).map(t => t.id);
     return {
       visible    : new Set(defaults),
-      order      : defaults,
+      order      : Object.values(ToolRegistry).map(t => t.id),
       wide       : new Set(Object.values(ToolRegistry).filter(t=>t.defaultWide).map(t=>t.id)),
       tall       : new Set(Object.values(ToolRegistry).filter(t=>t.defaultTall).map(t=>t.id)),
       minimized  : new Set(),
@@ -233,7 +267,7 @@ export default function XenyaProductivitySuite({ open, onClose }) {
     const defaults = Object.values(ToolRegistry).filter(t => t.defaultVisible).map(t => t.id);
     setState({
       visible    : new Set(defaults),
-      order      : defaults,
+      order      : Object.values(ToolRegistry).map(t => t.id),
       wide       : new Set(Object.values(ToolRegistry).filter(t=>t.defaultWide).map(t=>t.id)),
       tall       : new Set(Object.values(ToolRegistry).filter(t=>t.defaultTall).map(t=>t.id)),
       minimized  : new Set(),
@@ -419,7 +453,7 @@ export default function XenyaProductivitySuite({ open, onClose }) {
 
                 {visibleOrdered.length === 0 && (
                   <div className="xps-empty" style={{gridColumn:"1 / -1"}}>
-                    No tools on the canvas. Use the cards above to add Kanban, Calendar, etc.
+                    No tools on the canvas. Use the cards above to add Kanban, Calendar, Timer, etc.
                   </div>
                 )}
               </div>
