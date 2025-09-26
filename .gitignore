@@ -1,12 +1,42 @@
-.venv/
-__pycache__/
-*.pyc
+# macOS
+.DS_Store
+
+# Node
 node_modules/
+pnpm-lock.yaml
+yarn.lock
+npm-debug.log*
 dist/
 build/
-.dist/
-.build/
-.DS_Store
-*.log
+.cache/
+.vite/
+.next/
+coverage/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Env/Secrets
 .env
-.env.*
+.client.env
+.server.env
+client/.env
+server/.env
+
+# Editor
+.vscode/
+.idea/
+
+# Audio artifacts (keep via LFS if you need them)
+*.wav
+
+# Env files
+.env
+server/.env
+server/env
