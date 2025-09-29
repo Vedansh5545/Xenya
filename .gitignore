@@ -40,8 +40,3 @@ server/.env
 .env
 server/.env
 server/env
-
-# Env files
-.env
-server/.env
-server/env
