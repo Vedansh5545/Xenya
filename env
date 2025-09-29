@@ -1,0 +1,12 @@
+
+MS_CLIENT_SECRET=HTi8Q~NUWXyyX.fSx9K5qkht61ummGrwZT5CmbMg
+
+# optional if you created one in Azure:
+# MS_CLIENT_SECRET=<your secret>
+
+BASE_URL=http://localhost:5173
+MS_REDIRECT_PATH=/oauth/callback
+MS_CLIENT_ID=b562547f-b408-4705-abce-f5338d78bcdc
+MS_TENANT_ID=common
+SESSION_SECRET=change-me
+DEFAULT_TZ=America/Chicago
