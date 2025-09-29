@@ -1,4 +1,4 @@
-// server.js — Xenya backend (Jobs + Profile + Chat + Research + TTS/STT)
+// server.js — Xenya backend (Jobs + Profile + Tailor + Chat + Research + TTS/STT)
 // ESM required ("type":"module" in package.json)
 
 import 'dotenv/config'
@@ -23,7 +23,7 @@ import { spawn } from 'node:child_process'
 // TTS
 import { synthesizeWithPiper } from './tts.js'
 
-// Optional: Outlook Calendar router (comment these two lines if you don't use it)
+// Optional: Outlook Calendar router (comment these two lines if unused)
 import { calendarRouter } from './calendar.js'
 
 ffmpeg.setFfmpegPath(ffmpegStatic)
@@ -396,7 +396,6 @@ ${trimText(context, 12000)}`
 /* ---------- deep merge helper ---------- */
 function deepMerge(base, patch) {
   if (Array.isArray(base) || Array.isArray(patch)) {
-    // prefer patch if provided, else base
     return (patch !== undefined) ? patch : base;
   }
   if (typeof base === 'object' && base && typeof patch === 'object' && patch) {
@@ -411,9 +410,8 @@ function deepMerge(base, patch) {
 
 /* ---------- Profile API (normalized) ---------- */
 app.get('/api/profile', (_req, res) => {
-  const raw = readProfile();              // might be partial/older shape
+  const raw = readProfile();
   const normalized = deepMerge(DEFAULT_PROFILE, raw || {});
-  // write back the normalized version so next reads are consistent
   writeProfile(normalized);
   res.setHeader('Cache-Control', 'no-store');
   res.json({ ok: true, profile: normalized });
@@ -429,7 +427,6 @@ app.post('/api/profile', (req, res) => {
   } else if (body.patch && typeof body.patch === 'object') {
     target = deepMerge(current, body.patch);
   } else if (body.path && 'value' in body) {
-    // path set (dot notation)
     const seg = String(body.path).split('.');
     const draft = JSON.parse(JSON.stringify(current));
     let obj = draft;
@@ -444,7 +441,6 @@ app.post('/api/profile', (req, res) => {
     return res.status(400).json({ ok: false, error: 'Provide {profile} or {patch} or {path,value}' });
   }
 
-  // ensure final shape is normalized against defaults
   const normalized = deepMerge(DEFAULT_PROFILE, target);
   const saved = writeProfile(normalized);
   res.setHeader('Cache-Control', 'no-store');
@@ -561,6 +557,140 @@ app.post('/api/tracker', (req,res)=>{
   res.json({ ok:true, job:saved })
 })
 
+app.get('/api/tracker/:id', (req,res)=>{
+  const db = readTracker()
+  const job = db.jobs.find(j => j.id === req.params.id)
+  if (!job) return res.status(404).json({ ok:false, error:'not found' })
+  res.json({ ok:true, job })
+})
+
+/* ------------------------------------------------------------------ */
+/* Tailor: Cover Letter                                               */
+/* ------------------------------------------------------------------ */
+// tiny helpers
+const clean = (s='') => String(s || '').replace(/\s+/g,' ').trim();
+const words = (s='') => clean(s).split(' ').filter(Boolean).length;
+
+function normSkill(s=''){
+  const x = s.toLowerCase().trim();
+  const map = {
+    'scikit-learn':'sklearn', 'pytorch lightning':'pytorch', 'c++':'cpp',
+    'computer vision':'opencv', 'llm':'transformers'
+  };
+  return map[x] || x;
+}
+function uniqList(arr){ return Array.from(new Set(arr.filter(Boolean).map(normSkill))) }
+function intersectRanked(a=[], b=[]){
+  const sb = new Set(b);
+  return a.filter(x=>sb.has(x));
+}
+function stripSignature(md=''){
+  // remove trailing sign-off if the model added one
+  const rx = /\n(?:best|thanks|sincerely|regards)[^,\n]*,?\s*\n[ \t]*[A-Za-z .'-]+[ \t]*\n*$/i;
+  return md.replace(rx,'\n').trim();
+}
+function capWords(md='', cap=300){
+  const parts = md.split(/\s+/);
+  if (parts.length <= cap) return md.trim();
+  return parts.slice(0, cap-1).join(' ') + '…';
+}
+function detectRisks(jd={}, profile={}){
+  const risks=[];
+  // location
+  const loc = (jd.location||'').toLowerCase();
+  const wants = (profile.preferences?.locations||[]).map(x=>String(x).toLowerCase());
+  if (loc && !/remote/.test(loc) && wants.length && !wants.some(w=>loc.includes(w.split(',')[0]))){
+    risks.push({ type:'location', text:'Location may not match preferences (onsite/hybrid).' });
+  }
+  // visa
+  if (jd.visa_status==='unfriendly'){
+    risks.push({ type:'visa', text:'Posting indicates no sponsorship; verify eligibility.' });
+  }
+  return risks;
+}
+
+app.post('/api/tailor/draft/cover-letter', async (req, res) => {
+  try {
+    const {
+      jd_struct = {},
+      profile: profileIn,
+      companyContext = '',
+      tone = 'professional',         // professional | warm | crisp
+      focus = 'auto',                // auto | project | impact
+      wordCap = 300
+    } = req.body || {};
+
+    const profile = profileIn || readProfile();
+
+    const jdSkills = uniqList([...(jd_struct.skills_must||[]), ...(jd_struct.keywords||[])]);
+    const pfSkills = uniqList(profile.skills || []);
+    const overlap  = intersectRanked(jdSkills, pfSkills).slice(0, 8);
+
+    const roles = (profile.preferences?.roles||[]).slice(0,3).join(', ') || profile.seniority;
+    const locations = (profile.preferences?.locations||[]).slice(0,3).join(', ');
+    const projects = (profile.projects||[]).slice(0,6);
+
+    const rules = [
+      `Audience: hiring manager for "${jd_struct.title||'role'}".`,
+      `Tone: ${tone}.`,
+      `Focus: ${focus==='project'?'project-heavy (2-3 bullets about shipped work)':
+               focus==='impact' ? 'impact-heavy (metrics and outcomes)' : 'balanced (relevance > fluff)'}.`,
+      `Hard limit: ${wordCap} words. Absolutely do not exceed.`,
+      `No generic phrases (avoid "passionate", "fast learner", "I am excited").`,
+      `Use only facts from the profile/projects—do not invent metrics. If no metric, describe outcome qualitatively.`,
+      `Do NOT include a signature or closing name; client app adds it.`,
+      `Output Markdown only, no title line, no greeting block if address not provided.`,
+      `Structure exactly:
+       - Hook: 1–2 sentences tailored to company/product.
+       - Bullets: 3 bullets mapping my work to the role (each starts with a strong verb + outcome).
+       - Close: 1 sentence with availability + call to action.`
+    ].join('\n');
+
+    const context = [
+      `JOB`,
+      `- Title: ${jd_struct.title||'—'}`,
+      `- Location: ${jd_struct.location||'—'}`,
+      `- Required/mentioned skills: ${overlap.join(', ') || '—'}`,
+      companyContext ? `- Company context: ${clean(companyContext)}` : null,
+      ``,
+      `PROFILE`,
+      `- Name: ${profile.identity?.full_name || '—'}`,
+      `- Seniority: ${profile.seniority || '—'}`,
+      `- Target roles: ${roles || '—'}`,
+      `- Locations: ${locations || '—'}`,
+      `- Relevant skills: ${overlap.join(', ') || '—'}`,
+      `- Projects JSON (names + tags only; do not invent details):`,
+      JSON.stringify(projects.map(p=>({ name:p.name, tags:p.tags })), null, 2).slice(0, 2000),
+    ].filter(Boolean).join('\n');
+
+    const system = `You are an ATS-savvy career writer who crafts specific, high-signal cover letters.`;
+    const prompt = `${rules}\n\n${context}\n\nWrite the letter now:`;
+
+    let md = await ollamaChat({
+      system,
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.2
+    });
+
+    md = stripSignature(md);
+    if (words(md) > wordCap) {
+      // quick compression pass
+      const comp = await ollamaChat({
+        system: `You are a concise editor. Reduce to <= ${wordCap} words without losing concrete details. No signature.`,
+        messages: [{ role: 'user', content: md }],
+        temperature: 0.1
+      });
+      md = stripSignature(comp);
+      md = capWords(md, wordCap);
+    }
+
+    const risks = detectRisks(jd_struct, profile);
+    res.json({ ok: true, md: clean(md), risks });
+  } catch (e) {
+    res.status(500).json({ ok:false, error: String(e) });
+  }
+});
+
 /* ------------------------------------------------------------------ */
 /* Root                                                               */
 /* ------------------------------------------------------------------ */
@@ -570,7 +700,8 @@ Endpoints:
   /api/models, /api/models/select, /api/models/refresh, /api/health
   /api/chat
   /api/profile (GET/POST)
-  /api/jobs/parse, /api/jobs/score, /api/tracker
+  /api/jobs/parse, /api/jobs/score, /api/tracker, /api/tracker/:id
+  /api/tailor/draft/cover-letter
   /api/search, /api/summary?url=&model=, /api/rss, /api/research?q=&model=
   /api/tts (POST JSON {text, voice})
   /api/stt (POST multipart: audio=<webm>)`) })

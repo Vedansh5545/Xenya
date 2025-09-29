@@ -1,4 +1,140 @@
 {
+  "identity": {
+    "full_name": "Vedansh",
+    "emails": {
+      "primary": "",
+      "alt": ""
+    },
+    "phone": "",
+    "links": {
+      "linkedin": "",
+      "github": "",
+      "portfolio": ""
+    }
+  },
+  "location": {
+    "current": "",
+    "preferred": [
+      "San Francisco Bay Area, CA",
+      "Seattle, WA",
+      "New York, NY",
+      "Remote"
+    ],
+    "remote_ok": true,
+    "relocate": "yes"
+  },
+  "seniority": "senior",
+  "work_auth": {
+    "status": "F-1 (STEM-OPT eligible)",
+    "cpt": {
+      "eligible": true,
+      "type": "full-time",
+      "window": {
+        "start": "",
+        "end": ""
+      }
+    },
+    "opt": {
+      "eligible": true,
+      "window": {
+        "start": "",
+        "end": ""
+      },
+      "stem_eligible": true
+    },
+    "sponsorship_now": "no",
+    "sponsorship_future": "yes",
+    "e_verify": "preferred"
+  },
+  "education": [],
+  "preferences": {
+    "roles": [
+      "AI/ML Engineer",
+      "Machine Learning Engineer",
+      "Data Engineer",
+      "Computer Vision Engineer",
+      "Full-Stack Engineer (AI)"
+    ],
+    "industries": [
+      "Tech",
+      "AI/ML",
+      "Robotics"
+    ],
+    "locations": [
+      "Remote (US)",
+      "Seattle WA",
+      "Bay Area CA",
+      "Austin TX",
+      "New York NY",
+      "Dallas TX"
+    ],
+    "salary": {
+      "min": "",
+      "max": "",
+      "currency": "USD"
+    },
+    "start_date": "",
+    "remote": true,
+    "onsite": true
+  },
+  "skills": [
+    "python",
+    "pytorch",
+    "tensorflow",
+    "computer vision",
+    "deep learning",
+    "scikit-learn",
+    "numpy",
+    "pandas",
+    "SQL",
+    "docker",
+    "kubernetes",
+    "aws",
+    "react",
+    "node.js",
+    "typescript",
+    "express",
+    "opencv",
+    "ros",
+    "onnx",
+    "tensorrt",
+    "git",
+    "linux"
+  ],
+  "projects": [
+    {
+      "name": "ASL Gesture Recognition",
+      "tags": [
+        "computer-vision",
+        "cnn",
+        "tensorflow",
+        "opencv"
+      ]
+    },
+    {
+      "name": "Human Pose Estimation",
+      "tags": [
+        "pose-estimation",
+        "keypoints",
+        "pytorch",
+        "coco",
+        "gnn"
+      ]
+    },
+    {
+      "name": "Robotics Control with ROS",
+      "tags": [
+        "ros",
+        "robotics",
+        "slam",
+        "docker"
+      ]
+    }
+  ],
+  "qa_bank": {},
+  "meta": {
+    "last_updated": "2025-09-29T19:19:18.848Z"
+  },
   "profile": {
     "identity": {
       "full_name": "Vedansh <last name>",
@@ -190,55 +326,5 @@
     "meta": {
       "last_updated": "<auto>"
     }
-  },
-  "meta": {
-    "last_updated": "2025-09-29T03:42:44.244Z"
-  },
-  "seniority": "senior",
-  "preferences": {
-    "roles": [
-      "AI/ML Engineer",
-      "Machine Learning Engineer",
-      "Data Engineer",
-      "Computer Vision Engineer",
-      "Full-Stack Engineer (AI)"
-    ],
-    "locations": [
-      "Remote (US)",
-      "Seattle WA",
-      "Bay Area CA",
-      "Austin TX",
-      "New York NY",
-      "Dallas TX"
-    ]
-  },
-  "skills": [
-    "python",
-    "pytorch",
-    "tensorflow",
-    "computer vision",
-    "deep learning",
-    "scikit-learn",
-    "numpy",
-    "pandas",
-    "SQL",
-    "docker",
-    "kubernetes",
-    "aws",
-    "react",
-    "node.js",
-    "typescript",
-    "express",
-    "opencv",
-    "ros",
-    "onnx",
-    "tensorrt",
-    "git",
-    "linux"
-  ],
-  "work_auth": {
-    "status": "F-1 (STEM-OPT eligible)",
-    "sponsorship_now": "no",
-    "sponsorship_future": "yes"
   }
 }

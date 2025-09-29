@@ -1,6 +1,7 @@
 // components/jobs/JobsDock.jsx
 import React, { useEffect, useMemo, useState } from "react";
 import JobInbox from "./JobInbox.jsx";
+import CoverLetter from "./CoverLetter.jsx";
 
 /* ---------- Tiny SVG icons (fixed size) ---------- */
 const ico = (d) => (
@@ -49,13 +50,14 @@ export default function JobsDock({
     return ()=>{ window.removeEventListener("jobs:open", onOpenEvt); window.removeEventListener("keydown", onKey) };
   }, [hotkey]);
 
+  // Default tabs: now includes Cover Letter
   const defaults = [
-    { id:"inbox",     label:"Inbox",     icon:<IBriefcase/>, node:<JobInbox defaultText="" onAdd={(job) => console.log("Added:", job)} /> },
-    { id:"tracker",   label:"Tracker",   icon:<IList/>,      node:null },
-    { id:"tailor",    label:"Tailor",    icon:<IWand/>,      node:null },
-    { id:"outreach",  label:"Outreach",  icon:<IMail/>,      node:null },
-    { id:"interview", label:"Interview", icon:<IChat/>,      node:null },
-    { id:"profile",   label:"Profile",   icon:<IUserCog/>,   node:null },
+    { id:"inbox",     label:"Inbox",        icon:<IBriefcase/>, node:<JobInbox defaultText="" onAdd={(job) => console.log("Added:", job)} /> },
+    { id:"cover",     label:"Cover",        icon:<IWand/>,      node:<CoverLetter /> },
+    { id:"tracker",   label:"Tracker",      icon:<IList/>,      node:null },
+    { id:"outreach",  label:"Outreach",     icon:<IMail/>,      node:null },
+    { id:"interview", label:"Interview",    icon:<IChat/>,      node:null },
+    { id:"profile",   label:"Profile",      icon:<IUserCog/>,   node:null },
   ];
   const tabList = tabs.length ? tabs : defaults;
   const current = tabList.find(t=>t.id===active) || tabList[0];
