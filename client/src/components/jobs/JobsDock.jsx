@@ -1,5 +1,6 @@
 // components/jobs/JobsDock.jsx
 import React, { useEffect, useMemo, useState } from "react";
+import JobInbox from "./JobInbox.jsx";
 
 /* ---------- Tiny SVG icons (fixed size) ---------- */
 const ico = (d) => (
@@ -49,7 +50,7 @@ export default function JobsDock({
   }, [hotkey]);
 
   const defaults = [
-    { id:"inbox",     label:"Inbox",     icon:<IBriefcase/>, node:null },
+    { id:"inbox",     label:"Inbox",     icon:<IBriefcase/>, node:<JobInbox defaultText="" onAdd={(job) => console.log("Added:", job)} /> },
     { id:"tracker",   label:"Tracker",   icon:<IList/>,      node:null },
     { id:"tailor",    label:"Tailor",    icon:<IWand/>,      node:null },
     { id:"outreach",  label:"Outreach",  icon:<IMail/>,      node:null },

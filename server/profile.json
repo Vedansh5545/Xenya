@@ -1,0 +1,244 @@
+{
+  "profile": {
+    "identity": {
+      "full_name": "Vedansh <last name>",
+      "emails": {
+        "primary": "<fill>@email.com",
+        "alt": ""
+      },
+      "phone": "<fill>",
+      "links": {
+        "linkedin": "https://www.linkedin.com/in/<fill>",
+        "github": "https://github.com/<fill>",
+        "portfolio": "https://<fill>"
+      }
+    },
+    "location": {
+      "current": "<city, state/country>",
+      "preferred": [
+        "Bay Area, CA",
+        "Seattle, WA",
+        "New York, NY",
+        "Remote"
+      ],
+      "remote_ok": true,
+      "relocate": "yes"
+    },
+    "seniority": "junior",
+    "work_auth": {
+      "status": "F-1",
+      "cpt": {
+        "eligible": true,
+        "type": "full-time",
+        "window": {
+          "start": "<YYYY-MM-DD>",
+          "end": "<YYYY-MM-DD>"
+        }
+      },
+      "opt": {
+        "eligible": true,
+        "window": {
+          "start": "<YYYY-MM-DD>",
+          "end": "<YYYY-MM-DD>"
+        },
+        "stem_eligible": true
+      },
+      "sponsorship_now": "no",
+      "sponsorship_future": "yes",
+      "e_verify": "preferred"
+    },
+    "education": [
+      {
+        "level": "<BS/MS>",
+        "degree": "Computer Science",
+        "school": "<University>",
+        "gpa": "<fill>",
+        "grad_month": "<MM>",
+        "grad_year": "<YYYY>",
+        "courses": [
+          "Machine Learning",
+          "Deep Learning",
+          "Computer Vision",
+          "Data Structures & Algorithms",
+          "Distributed Systems"
+        ]
+      }
+    ],
+    "preferences": {
+      "roles": [
+        "AI/ML Engineer",
+        "Machine Learning Engineer",
+        "Data Engineer"
+      ],
+      "industries": [
+        "Tech",
+        "AI/ML",
+        "Robotics"
+      ],
+      "locations": [
+        "Remote",
+        "San Francisco Bay Area, CA",
+        "Seattle, WA",
+        "New York, NY"
+      ],
+      "salary": {
+        "min": "<fill>",
+        "max": "<fill>",
+        "currency": "USD"
+      },
+      "start_date": "<YYYY-MM-DD>",
+      "remote": true,
+      "onsite": true
+    },
+    "skills": [
+      "python",
+      "pytorch",
+      "tensorflow",
+      "computer vision",
+      "opencv",
+      "pose estimation",
+      "gnn",
+      "transformers",
+      "scikit-learn",
+      "pandas",
+      "numpy",
+      "sql",
+      "docker",
+      "kubernetes",
+      "aws",
+      "gcp",
+      "linux",
+      "git",
+      "react",
+      "node",
+      "express",
+      "ros"
+    ],
+    "skills_matrix": {
+      "primary": [
+        "Python",
+        "PyTorch",
+        "TensorFlow",
+        "Computer Vision",
+        "GNNs",
+        "Transformers"
+      ],
+      "secondary": [
+        "SQL",
+        "Data Engineering",
+        "React",
+        "Node.js"
+      ],
+      "tools": [
+        "Docker",
+        "Kubernetes",
+        "Linux",
+        "Git",
+        "ROS",
+        "AWS",
+        "GCP"
+      ]
+    },
+    "projects": [
+      {
+        "name": "ASL Gesture Recognition",
+        "tags": [
+          "computer-vision",
+          "cnn",
+          "tensorflow",
+          "opencv"
+        ],
+        "bullets": [
+          "Built end-to-end ASL gesture classifier with CNNs; real-time webcam pipeline using OpenCV; achieved <fill>% accuracy on <fill> dataset.",
+          "Optimized data augmentation and training loop; reduced inference latency to <fill> ms on CPU."
+        ]
+      },
+      {
+        "name": "Human Pose Estimation",
+        "tags": [
+          "pose-estimation",
+          "keypoints",
+          "pytorch",
+          "coco",
+          "gnn"
+        ],
+        "bullets": [
+          "Implemented keypoint detector and post-processing; evaluated on COCO keypoints; mAP@0.5: <fill>.",
+          "Explored GNN refinement over skeleton graph to improve occlusion cases by <fill>%."
+        ]
+      },
+      {
+        "name": "Robotics Control with ROS",
+        "tags": [
+          "ros",
+          "robotics",
+          "slam"
+        ],
+        "bullets": [
+          "Integrated ROS nodes for sensor fusion and teleop; built CI pipeline with Docker; improved cycle time by <fill>%."
+        ]
+      }
+    ],
+    "achievements": [],
+    "qa_bank": {
+      "why_company_template": "I’m excited about {company_mission} and this team’s focus on {team_keywords}. My projects in {your_project_match} align closely; I can ship quickly and measure impact.",
+      "work_auth_answer": "I am on F-1 status. I am eligible for CPT/OPT (STEM-OPT eligible). I do not require sponsorship now while on OPT; I will require H-1B sponsorship in the future.",
+      "relocation": "Open to relocate to Bay Area/Seattle/NYC; remote preferred.",
+      "start_date": "<YYYY-MM-DD>",
+      "compensation": "Open to discussion based on role scope and location."
+    },
+    "meta": {
+      "last_updated": "<auto>"
+    }
+  },
+  "meta": {
+    "last_updated": "2025-09-29T03:42:44.244Z"
+  },
+  "seniority": "senior",
+  "preferences": {
+    "roles": [
+      "AI/ML Engineer",
+      "Machine Learning Engineer",
+      "Data Engineer",
+      "Computer Vision Engineer",
+      "Full-Stack Engineer (AI)"
+    ],
+    "locations": [
+      "Remote (US)",
+      "Seattle WA",
+      "Bay Area CA",
+      "Austin TX",
+      "New York NY",
+      "Dallas TX"
+    ]
+  },
+  "skills": [
+    "python",
+    "pytorch",
+    "tensorflow",
+    "computer vision",
+    "deep learning",
+    "scikit-learn",
+    "numpy",
+    "pandas",
+    "SQL",
+    "docker",
+    "kubernetes",
+    "aws",
+    "react",
+    "node.js",
+    "typescript",
+    "express",
+    "opencv",
+    "ros",
+    "onnx",
+    "tensorrt",
+    "git",
+    "linux"
+  ],
+  "work_auth": {
+    "status": "F-1 (STEM-OPT eligible)",
+    "sponsorship_now": "no",
+    "sponsorship_future": "yes"
+  }
+}
