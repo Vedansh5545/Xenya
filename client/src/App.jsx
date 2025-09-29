@@ -10,6 +10,7 @@ import ChatBox from './components/ChatBox.jsx'   // compact composer (Talk + Sen
 import XenyaProductivitySuite from "./components/XenyaProductivitySuite.jsx";
 import { addKanbanTask, moveKanbanTaskByTitle } from './components/MiniKanban.jsx'  // Kanban helper APIs
 import QuickCapture from './components/QuickCapture.jsx';
+import JobsDock from "./components/jobs/JobsDock.jsx";
 
 /* ---------- Tone & Microcopy ---------- */
 const TONE = {
@@ -332,8 +333,8 @@ function Dispatch({ items=[] }){
   )
 }
 
-/* --- Action Dock (Notes + Productivity) --- */
-function ActionDock({ onOpenNotes, onOpenProd }) {
+/* --- Action Dock (Notes + Productivity + Jobs) --- */
+function ActionDock({ onOpenNotes, onOpenProd, onOpenJobs }) {
   const [hidden, setHidden] = useState(false);
 
   return (
@@ -360,6 +361,10 @@ function ActionDock({ onOpenNotes, onOpenProd }) {
           </button>
           <button className="fab" onClick={onOpenProd} aria-label="Open Productivity">
             <span className="ico">⚡</span> Productivity
+          </button>
+          {/* New Jobs button (same style) */}
+          <button className="fab" onClick={onOpenJobs} aria-label="Open Jobs">
+            <span className="ico">💼</span> Jobs
           </button>
         </div>
         <button className="secret" title={hidden ? 'Show quick actions' : 'Hide quick actions'} onClick={()=>setHidden(v=>!v)} />
@@ -1106,11 +1111,14 @@ Tip: use /events week local to see ids.` })
       <QuickCapture />
       {/* Notes still mounts; its original FAB is hidden by the effect above */}
       <Notes/>
+      {/* Jobs Dock (opens from the dock's Jobs button; also has its own hotkey by default) */}
+      <JobsDock initialOpen={false} />
 
-      {/* Unified action dock (Notes + Productivity + secret Hide) */}
+      {/* Unified action dock (Notes + Productivity + Jobs) */}
       <ActionDock
         onOpenNotes={openNotesViaExisting}
         onOpenProd={()=>setKanbanOpen(true)}
+        onOpenJobs={()=> window.jobsDock?.open?.('inbox')}
       />
 
       {/* Sidebar */}

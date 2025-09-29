@@ -83,7 +83,7 @@ cd server
 npm install
 
 # in client
-cd ../client
+cd client
 npm install
 ```
 
