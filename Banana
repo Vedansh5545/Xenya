@@ -1,5 +1,5 @@
 
-MS_CLIENT_SECRET=HTi8Q~NUWXyyX.fSx9K5qkht61ummGrwZT5CmbMg
+# MS_CLIENT_SECRET=HTi8Q~NUWXyyX.fSx9K5qkht61ummGrwZT5CmbMg
 
 # optional if you created one in Azure:
 # MS_CLIENT_SECRET=<your secret>
