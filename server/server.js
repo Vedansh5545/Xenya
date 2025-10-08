@@ -22,6 +22,8 @@ import { spawn } from 'node:child_process'
 
 // TTS
 import { synthesizeWithPiper } from './tts.js'
+// Research v2
+import { runResearch } from './research2.js'
 
 // Optional: Outlook Calendar router (comment these two lines if unused)
 import { calendarRouter } from './calendar.js'
@@ -334,60 +336,68 @@ app.get('/api/rss', async (_req,res)=>{ try{
   res.json({ ok:true, feeds:results })
 }catch(err){ res.status(500).json({ ok:false, error:String(err) }) } })
 
-function expandAcronyms(q){ let t=q; t=t.replace(/\bgnn\b/ig,'graph neural networks'); t=t.replace(/\bpose detection\b/ig,'pose estimation'); t=t.replace(/\bkeypoint(s)?\b/ig,'keypoints'); return t }
-function enrichTopic(q){ if(/pose\s+(estimation|detection)/i.test(q)) q+=' human pose keypoints skeleton COCO MPII'; return q }
-async function deriveTopicFromUrl(u){
-  try{ const { title, textContent } = await extractReadable(u); const host=new URL(u).hostname.replace(/^www\./,''); const topic=(title||textContent.slice(0,120)||u).trim(); return { topic, host, preview: textContent.slice(0,300) } }
-  catch{ const host=new URL(u).hostname.replace(/^www\./,''); return { topic: host, host, preview:'' } }
-}
-app.get('/api/research', async (req,res)=>{ try{
-  let q=String(req.query.q||'').slice(0,400); const model=String(req.query.model||'')||ACTIVE_MODEL
-  if(!q) return res.status(400).json({ ok:false, error:'q required' })
+app.post('/api/research', async (req, res) => {
+  try {
+    const { q, model, maxAgeDays = 30, maxSources = 12 } = req.body || {}
+    if (!q) return res.status(400).json({ error: 'Missing q' })
 
-  let fromUrl = null
-  if (isHttpUrl(q)) { fromUrl = await deriveTopicFromUrl(q); q = fromUrl.topic }
-  q = enrichTopic(expandAcronyms(q))
+    const r = await runResearch({ q, maxAgeDays, maxSources })
+    const prompt = r.draft.synthesisPrompt
+    const usedModel = model || ACTIVE_MODEL
+    const answer = await ollamaChat({
+      system: 'You are Xenya, a precise, up-to-date researcher.',
+      messages: [{ role: 'user', content: prompt }],
+      model: usedModel,
+      temperature: 0.2
+    })
 
-  const queries = uniqBy([ q, q.replace(/\s+/g,' ').trim(), `${q} review overview`, /pose\s+(estimation|detection)/i.test(q) ? `${q} keypoints skeleton` : null ].filter(Boolean), x=>x)
-  let hits=[]
-  for(const qq of queries){ const h=await resilientSearch(qq,5); hits = uniqBy([...hits, ...h], x=>x.url); if(hits.length>=7) break }
-  hits = hits.slice(0,7)
+    return res.json({
+      answer,
+      summary: answer,
+      citations: r.draft.citations,
+      images: r.draft.images,
+      tables: r.draft.tables,
+      chart: r.draft.chart,
+      error: null
+    })
+  } catch (e) {
+    console.error('research error:', e)
+    res.status(500).json({ error: 'Research failed', detail: String(e) })
+  }
+})
 
-  const wiki = await wikipediaSummary(q)
-  const snippets = await Promise.all(hits.map(async h=>{ try{
-    const html=await (await fetchWithTimeout(h.url,{headers:UA_HEADERS},10000)).text()
-    const $=cheerio.load(html); const meta=$('meta[name="description"]').attr('content') || $('p').first().text().trim()
-    return { ...h, snippet: trimText(meta, 320) }
-  }catch{ return { ...h, snippet:'' } }}))
+app.get('/api/research', async (req, res) => {
+  try {
+    const q = String(req.query.q || req.query.query || '').trim()
+    const model = String(req.query.model || '')
+    const maxAgeDays = Number(req.query.days || req.query.maxAgeDays || 30)
+    const maxSources = Number(req.query.max || req.query.maxSources || 12)
+    if (!q) return res.status(400).json({ error: 'Missing q' })
 
-  const urlSource = fromUrl ? `S0: Original link — ${fromUrl.topic} (source: https://${fromUrl.host})` : null
-  const context = [ urlSource, wiki ? `WIKIPEDIA: ${wiki.title} — ${wiki.extract} (source: ${wiki.url})` : null,
-    ...snippets.map((s,i)=>`S${i+1}: ${s.title} — ${s.snippet} (source: ${s.url})`) ].filter(Boolean).join('\n\n')
+    const r = await runResearch({ q, maxAgeDays, maxSources })
+    const prompt = r.draft.synthesisPrompt
+    const usedModel = model || ACTIVE_MODEL
+    const answer = await ollamaChat({
+      system: 'You are Xenya, a precise, up-to-date researcher.',
+      messages: [{ role: 'user', content: prompt }],
+      model: usedModel,
+      temperature: 0.2
+    })
 
-  const prompt = `Research question: ${q}
-
-Use the sources below to produce a concise, well-structured answer.
-- Be neutral and specific.
-- If facts conflict, note it briefly.
-- End with a short list of citations [S1], [S2], ... mapping to the sources.
-
-SOURCES:
-${trimText(context, 12000)}`
-  const answer = await ollamaChat({
-    system:'You are Xenya, a pragmatic research assistant. Cite as [S1], [S2], ... and list URLs at the end.',
-    messages:[{role:'user',content:prompt}],
-    temperature:0.1,
-    model
-  })
-
-  const sourceList = [
-    fromUrl ? { label:'S0', title: fromUrl.topic, url: q } : null,
-    wiki ? { label:'WIKI', title: wiki.title, url: wiki.url } : null,
-    ...snippets.map((s,i)=>({ label:`S${i+1}`, title:s.title, url:s.url }))
-  ].filter(Boolean)
-
-  res.json({ ok:true, answer, sources: sourceList, model })
-}catch(err){ res.status(500).json({ ok:false, error:String(err) }) } })
+    res.json({
+      answer,
+      summary: answer,
+      citations: r.draft.citations,
+      images: r.draft.images,
+      tables: r.draft.tables,
+      chart: r.draft.chart,
+      error: null
+    })
+  } catch (e) {
+    console.error('research error (GET):', e)
+    res.status(500).json({ error: 'Research failed', detail: String(e) })
+  }
+})
 
 /* ------------------------------------------------------------------ */
 /* Profile API                                                        */
@@ -702,7 +712,7 @@ Endpoints:
   /api/profile (GET/POST)
   /api/jobs/parse, /api/jobs/score, /api/tracker, /api/tracker/:id
   /api/tailor/draft/cover-letter
-  /api/search, /api/summary?url=&model=, /api/rss, /api/research?q=&model=
+  /api/search, /api/summary?url=&model=, /api/rss, /api/research (POST)
   /api/tts (POST JSON {text, voice})
   /api/stt (POST multipart: audio=<webm>)`) })
 

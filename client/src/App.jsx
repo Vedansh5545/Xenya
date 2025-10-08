@@ -49,7 +49,7 @@ const makeId = (taken = new Set()) => {
   return id
 }
 
-/* ---------- Query cleaner + citation filter for /research ---------- */
+// --- Query cleaner + citation filter for /research ---
 const STOP = new Set([
   "a","an","the","and","or","but","if","then","so","to","for","of","in","on","with",
   "how","what","why","when","where","who","whom","which","can","could","should",
@@ -81,6 +81,7 @@ function filterCitations(cites = []) {
   }
   return good
 }
+
 
 /* ---------- Mic status normalizer ---------- */
 function normalizeMicStatus(s) {
@@ -245,15 +246,21 @@ async function routeMessage(content, model, history, rolePrompt){
     const r   = await research(q0, model)
     const summary   = r?.answer || r?.summary || '(no answer)'
     const citations = filterCitations(r?.citations || r?.sources || r?.links || [])
+    const images    = Array.isArray(r?.images) ? r.images : []
+    const tables    = Array.isArray(r?.tables) ? r.tables : []
+    const chart     = r?.chart || null
     return {
       role:'assistant',
       type:'report',
       reportTitle:`Research Summary: ${raw}`,
       content: summary,
       citations,
+      images,
+      tables,
+      chart,
       error: r?.error || null
-    }
-  }
+    }}
+
 
   if (isUrl(t)) {
     try {
@@ -282,41 +289,80 @@ async function routeMessage(content, model, history, rolePrompt){
 }
 
 /* ---------- Inline cards ---------- */
-function ReportCard({ title, body, cites=[], err }){
-  const [open, setOpen] = useState(false)
-  const shown = open ? cites : (cites || []).slice(0, 6)
-  const more  = Math.max(0, (cites || []).length - shown.length)
+// In App.jsx — drop-in replacement for ReportCard
+import { Bar } from 'react-chartjs-2'
+import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from 'chart.js'
+ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
+
+function ReportCard({ title, bodyMd, citations=[], images=[], tables=[], chart=null, err }){
   return (
-    <div className="report-card materialize">
-      <div className="report-head">🔷 {title}</div>
-      {err && <div className="small" style={{marginTop:4, color:"var(--muted)"}}>
-        Online sources were flaky; provided a concise synthesis{cites.length ? ' with citations.' : '.'}
-      </div>}
-      <div className="report-body">
-        {typeof body === 'string' ? <MarkdownMessage text={body}/> : body}
+    <div className="report-card rounded-2xl p-4 md:p-6 bg-black/30 border border-white/10 shadow-xl space-y-5">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xl md:text-2xl font-semibold">{title}</h3>
+        {err && <span className="text-amber-400 text-sm">⚠ {err}</span>}
       </div>
-      {!!shown.length && (
-        <div className="cites">
-          {shown.map((c,i)=>{
-            let href = c?.url || '#'
-            let label = c?.title
-            try{ if (!label) label = new URL(href).hostname }catch{}
-            const ico = (()=>{ try{ return `${new URL(href).origin}/favicon.ico` }catch{ return '' } })()
-            return (
-              <a key={i} className="pill" href={href} target="_blank" rel="noreferrer noopener">
-                {ico && <img alt="" src={ico} />}
-                <span className="pill-text">{label || 'source'}</span>
-              </a>
-            )
-          })}
-          {more > 0 && (
-            <button className="pill" onClick={()=>setOpen(true)} title="Show more sources">+{more} more</button>
-          )}
+
+      {/* Summary */}
+      <MarkdownMessage text={bodyMd || '_No summary returned._'} />
+
+      {/* Images */}
+      {images?.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+          {images.map((im, i) => (
+            <a key={i} href={im.source} target="_blank" rel="noreferrer"
+               className="group block rounded-xl overflow-hidden bg-white/5 border border-white/10">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={im.url} alt={im.title||'image'} className="w-full h-36 object-cover group-hover:opacity-90 transition" />
+              <div className="px-2 py-1 text-xs opacity-70 truncate">{im.title || im.source}</div>
+            </a>
+          ))}
+        </div>
+      )}
+
+      {/* Tables */}
+      {tables?.map((t, idx)=>(
+        <div key={idx} className="overflow-auto rounded-xl border border-white/10">
+          <div className="px-3 py-2 text-sm font-medium bg-white/5 border-b border-white/10">{t.title}</div>
+          <table className="min-w-full text-sm">
+            <thead>
+              <tr>{t.columns.map((c,i)=><th key={i} className="text-left px-3 py-2 bg-white/5">{c}</th>)}</tr>
+            </thead>
+            <tbody>
+              {t.rows.map((r,i)=>(
+                <tr key={i} className="odd:bg-white/0 even:bg-white/5">
+                  {r.map((cell,j)=><td key={j} className="px-3 py-2">{cell}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ))}
+
+      {/* Chart */}
+      {chart && chart.labels?.length > 0 && (
+        <div className="rounded-xl border border-white/10 p-3">
+          <Bar data={{
+            labels: chart.labels,
+            datasets: chart.series.map(s => ({ label: s.label, data: s.data }))
+          }} options={{ responsive: true, plugins: { legend: { display: true }}}} />
+        </div>
+      )}
+
+      {/* Citations */}
+      {citations?.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {citations.map((c,i)=>(
+            <a key={i} className="px-2 py-1 rounded-full bg-white/5 border border-white/10 text-xs hover:bg-white/10"
+               href={c.url} target="_blank" rel="noreferrer">
+              [{i+1}] {c.host || c.title}
+            </a>
+          ))}
         </div>
       )}
     </div>
   )
 }
+
 
 function Dispatch({ items=[] }){
   return (
@@ -1225,7 +1271,15 @@ Tip: use /events week local to see ids.` })
           {activeChat.messages.map((m,i)=>(
             <div key={i} className={m.role}>
               {m.type === 'report' ? (
-                <ReportCard title={m.reportTitle || 'Report'} body={m.content} cites={m.citations || m.cites || []} err={m.error} />
+                <ReportCard
+                 title={m.reportTitle || 'Report'}
+                 bodyMd={m.content}
+                 citations={m.citations || m.cites || []}
+                 images={m.images || []}
+                 tables={m.tables || []}
+                 chart={m.chart || null}
+                 err={m.error}
+               />
               ) : m.type === 'dispatch' ? (
                 <Dispatch items={m.items || []} />
               ) : (
