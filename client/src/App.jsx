@@ -11,7 +11,7 @@ import XenyaProductivitySuite from "./components/XenyaProductivitySuite.jsx";
 import { addKanbanTask, moveKanbanTaskByTitle } from './components/MiniKanban.jsx'  // Kanban helper APIs
 import QuickCapture from './components/QuickCapture.jsx';
 import JobsDock from "./components/jobs/JobsDock.jsx";
-
+import TodoDock from "./components/todo/TodoDock.jsx";
 /* ---------- Tone & Microcopy ---------- */
 const TONE = {
   motto: "Consider it sorted.",
@@ -380,7 +380,7 @@ function Dispatch({ items=[] }){
 }
 
 /* --- Action Dock (Notes + Productivity + Jobs) --- */
-function ActionDock({ onOpenNotes, onOpenProd, onOpenJobs }) {
+function ActionDock({ onOpenNotes, onOpenProd, onOpenJobs, onOpenTodo }) {
   const [hidden, setHidden] = useState(false);
 
   return (
@@ -411,6 +411,9 @@ function ActionDock({ onOpenNotes, onOpenProd, onOpenJobs }) {
           {/* New Jobs button (same style) */}
           <button className="fab" onClick={onOpenJobs} aria-label="Open Jobs">
             <span className="ico">💼</span> Jobs
+          </button>
+          <button className="fab" onClick={onOpenTodo} aria-label="Open To-Do">
+            <span className="ico">🗒️</span> To-Do
           </button>
         </div>
         <button className="secret" title={hidden ? 'Show quick actions' : 'Hide quick actions'} onClick={()=>setHidden(v=>!v)} />
@@ -1159,12 +1162,15 @@ Tip: use /events week local to see ids.` })
       <Notes/>
       {/* Jobs Dock (opens from the dock's Jobs button; also has its own hotkey by default) */}
       <JobsDock initialOpen={false} />
+      <TodoDock />
 
       {/* Unified action dock (Notes + Productivity + Jobs) */}
       <ActionDock
         onOpenNotes={openNotesViaExisting}
         onOpenProd={()=>setKanbanOpen(true)}
         onOpenJobs={()=> window.jobsDock?.open?.('inbox')}
+        onOpenTodo={()=>window.todoDock?.open?.('list')}
+
       />
 
       {/* Sidebar */}

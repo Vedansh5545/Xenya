@@ -1,0 +1,25 @@
+{
+  "goals": {
+    "long": [
+      {
+        "id": "seed-long",
+        "title": "Get an AI/ML job",
+        "weight": 80,
+        "targetDate": "2026-05-15"
+      }
+    ],
+    "short": [
+      {
+        "id": "seed-short",
+        "title": "Daily DSA warm-up",
+        "weight": 60,
+        "targetDate": "2025-12-10"
+      }
+    ]
+  },
+  "capacity": {
+    "userFocus": 5,
+    "userEnergy": 5
+  },
+  "updatedAt": "2025-10-13T00:51:36.981Z"
+}
