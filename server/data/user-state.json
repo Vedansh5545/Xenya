@@ -10,8 +10,14 @@
     ],
     "short": [
       {
+        "id": "24c52a7b62a5",
+        "title": "Best A.I. Coder",
+        "weight": 80,
+        "targetDate": "2025-11-25"
+      },
+      {
         "id": "seed-short",
-        "title": "Daily DSA warm-up",
+        "title": "Improve Coding skills",
         "weight": 60,
         "targetDate": "2025-12-10"
       }
@@ -21,5 +27,5 @@
     "userFocus": 5,
     "userEnergy": 5
   },
-  "updatedAt": "2025-10-13T00:51:36.981Z"
+  "updatedAt": "2025-10-13T01:35:24.005Z"
 }

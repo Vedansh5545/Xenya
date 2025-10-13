@@ -1,7 +1,8 @@
-// components/todo/TodoDock.jsx
-import React, { useEffect, useMemo, useState } from "react";
+// client/src/components/todo/TodoDock.jsx
+import React, { useEffect, useState } from "react";
 import TodoList from "./TodoList.jsx";
 import GoalsTab from "./GoalsTab.jsx";
+import BriefTab from "./BriefTab.jsx";
 
 const ico = (d) => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
@@ -22,24 +23,44 @@ export default function TodoDock({
   hotkey      = "T",
   storageKey  = "xenya.todoDock.v1",
 }) {
-  const [open, setOpen]   = useState(() => { try { return JSON.parse(localStorage.getItem(storageKey))?.open ?? initialOpen } catch { return initialOpen }});
-  const [active, setActive] = useState(() => { try { return JSON.parse(localStorage.getItem(storageKey))?.active ?? initialTab } catch { return initialTab }});
+  const [open, setOpen]   = useState(() => {
+    try { return JSON.parse(localStorage.getItem(storageKey))?.open ?? initialOpen }
+    catch { return initialOpen }
+  });
+  const [active, setActive] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(storageKey))?.active ?? initialTab }
+    catch { return initialTab }
+  });
 
-
-  useEffect(()=>{ localStorage.setItem(storageKey, JSON.stringify({ open, active })) }, [open, active]);
+  useEffect(() => {
+    localStorage.setItem(storageKey, JSON.stringify({ open, active }));
+  }, [open, active]);
 
   // expose window.todoDock API + hotkey
   useEffect(() => {
-    const api = { open:(tab)=>{ if(tab) setActive(tab); setOpen(true) }, close:()=>setOpen(false), toggle:()=>setOpen(v=>!v), setTab:setActive };
+    const api = {
+      open: (tab) => { if (tab) setActive(tab); setOpen(true); },
+      close: () => setOpen(false),
+      toggle: () => setOpen(v => !v),
+      setTab: setActive,
+    };
     window.todoDock = api;
-    const onOpenEvt = (e)=>{ if(e?.detail) setActive(e.detail); setOpen(true) };
-    const onKey     = (e)=>{ if((e.ctrlKey||e.metaKey) && String(e.key).toUpperCase()===String(hotkey).toUpperCase()){ e.preventDefault(); api.toggle() } };
+
+    const onOpenEvt = (e) => { if (e?.detail) setActive(e.detail); setOpen(true); };
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && String(e.key).toUpperCase() === String(hotkey).toUpperCase()) {
+        e.preventDefault(); api.toggle();
+      }
+    };
     window.addEventListener("todo:open", onOpenEvt);
     window.addEventListener("keydown", onKey);
-    return ()=>{ window.removeEventListener("todo:open", onOpenEvt); window.removeEventListener("keydown", onKey) };
+    return () => {
+      window.removeEventListener("todo:open", onOpenEvt);
+      window.removeEventListener("keydown", onKey);
+    };
   }, [hotkey]);
 
-  const panelPos = position==="right"
+  const panelPos = position === "right"
     ? "right:16px; bottom:96px; width:min(92vw, 980px); height:72vh;"
     : "left:50%; transform:translateX(-50%); bottom:96px; width:min(96vw, 1100px); height:70vh;";
 
@@ -85,16 +106,16 @@ export default function TodoDock({
         <div className="td-body">
           {/* Rail */}
           <div className="td-rail">
-            <button className={"td-tab"+(active==="list"?" active":"")} title="To-Do List" onClick={()=>setActive("list")}><IChecklist/></button>
-            <button className={"td-tab"+(active==="brief"?" active":"")} title="Brief"      onClick={()=>setActive("brief")}><INews/></button>
-            <button className={"td-tab"+(active==="goals"?" active":"")} title="Focus & Goals" onClick={()=>setActive("goals")}><IBrain/></button>
+            <button className={"td-tab"+(active==="list"?" active":"")}  title="To-Do List"     onClick={()=>setActive("list")}><IChecklist/></button>
+            <button className={"td-tab"+(active==="brief"?" active":"")} title="Brief"          onClick={()=>setActive("brief")}><INews/></button>
+            <button className={"td-tab"+(active==="goals"?" active":"")} title="Focus & Goals"  onClick={()=>setActive("goals")}><IBrain/></button>
           </div>
 
           {/* Content */}
           <div className="td-content">
-            {active==="list"  && <TodoList />}
-            {active==="brief" && <div className="td-empty">Brief coming next.</div>}
-            {active==="goals" && <GoalsTab />}
+            {active === "list"  && <TodoList />}
+            {active === "brief" && <BriefTab />}
+            {active === "goals" && <GoalsTab />}
           </div>
         </div>
       </div>
