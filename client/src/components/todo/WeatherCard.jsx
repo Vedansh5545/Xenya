@@ -23,29 +23,35 @@ const WMO = {
 
 /* ---- data fetchers (no API key needed) ---- */
 async function reverseGeocode(lat, lon){
-  const u = `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat}&longitude=${lon}&count=1`;
+  const raw = `https://geocoding-api.open-meteo.com/v1/reverse?latitude=${lat}&longitude=${lon}&count=1`;
+  const u = `/api/proxy/openmeteo?url=${encodeURIComponent(raw)}`;
   const r = await fetch(u);
-  const j = await r.json().catch(()=>({}));
+  const j = await r.json().catch(() => ({}));
   const p = j?.results?.[0];
   if (!p) return null;
   const parts = [p.name, p.admin1, p.country].filter(Boolean);
-  return parts.slice(0,2).join(", ");
+  return parts.slice(0, 2).join(", ");
 }
+
 async function getForecast({lat,lon}){
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}`
-    + `&current=temperature_2m,apparent_temperature,wind_speed_10m,weather_code`
-    + `&hourly=temperature_2m,precipitation_probability,weather_code`
-    + `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,uv_index_max,wind_speed_10m_max`
-    + `&timezone=auto`;
-  const r = await fetch(url);
-  const j = await r.json().catch(()=>null);
+  const raw =
+    `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+    `&current=temperature_2m,apparent_temperature,wind_speed_10m,weather_code` +
+    `&hourly=temperature_2m,precipitation_probability,weather_code` +
+    `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,uv_index_max,wind_speed_10m_max` +
+    `&timezone=auto`;
+  const u = `/api/proxy/openmeteo?url=${encodeURIComponent(raw)}`;
+
+  const r = await fetch(u);
+  const j = await r.json().catch(() => null);
   if (!j) return null;
+
   return {
-    current: { t:j.current?.temperature_2m, wc:j.current?.weather_code, wind:Math.round(j.current?.wind_speed_10m||0) },
-    hourly:  { times:j.hourly?.time||[], temps:j.hourly?.temperature_2m||[] },
-    today:   { tMax:j.daily?.temperature_2m_max?.[0], tMin:j.daily?.temperature_2m_min?.[0],
-               rainMm:j.daily?.precipitation_sum?.[0], uvMax:j.daily?.uv_index_max?.[0],
-               windKph:Math.round(j.daily?.wind_speed_10m_max?.[0]||0) }
+    current:{ t:j.current?.temperature_2m, wc:j.current?.weather_code, wind:Math.round(j.current?.wind_speed_10m||0) },
+    hourly:{ times:j.hourly?.time||[], temps:j.hourly?.temperature_2m||[] },
+    today:{ tMax:j.daily?.temperature_2m_max?.[0], tMin:j.daily?.temperature_2m_min?.[0],
+            rainMm:j.daily?.precipitation_sum?.[0], uvMax:j.daily?.uv_index_max?.[0],
+            windKph:Math.round(j.daily?.wind_speed_10m_max?.[0]||0) }
   };
 }
 

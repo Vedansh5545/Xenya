@@ -377,14 +377,28 @@ app.get('/api/rss', async (_req,res)=>{ try{
   res.json({ ok:true, feeds:results });
 }catch(err){ res.status(500).json({ ok:false, error:String(err) }) } });
 
-app.post('/api/research', async (req, res) => {
+/* ------------------------------------------------------------------ */
+/* Research (soft-fail; never 500)                                    */
+/* ------------------------------------------------------------------ */
+// --- Fallback if research2 fails: quick web search -> minimal "citations" ---
+async function fallbackResearchCitations(q, max = 8) {
   try {
-    const { q, model, maxAgeDays = 30, maxSources = 12 } = req.body || {};
-    if (!q) return res.status(400).json({ error: 'Missing q' });
+    const hits = await resilientSearch(q, max);
+    return (hits || []).map(h => ({ title: h.title || h.url, url: h.url }));
+  } catch {
+    return [];
+  }
+}
 
+app.post('/api/research', async (req, res) => {
+  const { q, model, maxAgeDays = 1, maxSources = 12 } = req.body || {};
+  if (!q) return res.status(400).json({ error: 'Missing q' });
+
+  try {
     const r = await runResearch({ q, maxAgeDays, maxSources });
-    const prompt = r.draft.synthesisPrompt;
+    const prompt = r.draft?.synthesisPrompt || `Summarize key points about: ${q}`;
     const usedModel = model || ACTIVE_MODEL;
+
     const answer = await ollamaChat({
       system: 'You are Xenya, a precise, up-to-date researcher.',
       messages: [{ role: 'user', content: prompt }],
@@ -395,29 +409,38 @@ app.post('/api/research', async (req, res) => {
     return res.json({
       answer,
       summary: answer,
-      citations: r.draft.citations,
-      images: r.draft.images,
-      tables: r.draft.tables,
-      chart: r.draft.chart,
+      citations: r.draft?.citations || [],
+      images: r.draft?.images || [],
+      tables: r.draft?.tables || [],
+      chart: r.draft?.chart || null,
       error: null
     });
   } catch (e) {
-    console.error('research error:', e);
-    res.status(500).json({ error: 'Research failed', detail: String(e) });
+    const citations = await fallbackResearchCitations(q, 10);
+    return res.json({
+      answer: null,
+      summary: null,
+      citations,
+      images: [],
+      tables: [],
+      chart: null,
+      error: 'research_pipeline_failed'
+    });
   }
 });
 
 app.get('/api/research', async (req, res) => {
-  try {
-    const q = String(req.query.q || req.query.query || '').trim();
-    const model = String(req.query.model || '');
-    const maxAgeDays = Number(req.query.days || req.query.maxAgeDays || 30);
-    const maxSources = Number(req.query.max || req.query.maxSources || 12);
-    if (!q) return res.status(400).json({ error: 'Missing q' });
+  const q = String(req.query.q || req.query.query || '').trim();
+  const model = String(req.query.model || '');
+  const maxAgeDays = Number(req.query.days || req.query.maxAgeDays || 1);
+  const maxSources = Number(req.query.max || req.query.maxSources || 12);
+  if (!q) return res.status(400).json({ error: 'Missing q' });
 
+  try {
     const r = await runResearch({ q, maxAgeDays, maxSources });
-    const prompt = r.draft.synthesisPrompt;
+    const prompt = r.draft?.synthesisPrompt || `Summarize key points about: ${q}`;
     const usedModel = model || ACTIVE_MODEL;
+
     const answer = await ollamaChat({
       system: 'You are Xenya, a precise, up-to-date researcher.',
       messages: [{ role: 'user', content: prompt }],
@@ -425,18 +448,42 @@ app.get('/api/research', async (req, res) => {
       temperature: 0.2
     });
 
-    res.json({
+    return res.json({
       answer,
       summary: answer,
-      citations: r.draft.citations,
-      images: r.draft.images,
-      tables: r.draft.tables,
-      chart: r.draft.chart,
+      citations: r.draft?.citations || [],
+      images: r.draft?.images || [],
+      tables: r.draft?.tables || [],
+      chart: r.draft?.chart || null,
       error: null
     });
   } catch (e) {
-    console.error('research error (GET):', e);
-    res.status(500).json({ error: 'Research failed', detail: String(e) });
+    const citations = await fallbackResearchCitations(q, 10);
+    return res.json({
+      answer: null,
+      summary: null,
+      citations,
+      images: [],
+      tables: [],
+      chart: null,
+      error: 'research_pipeline_failed'
+    });
+  }
+});
+
+/* --- CORS-safe proxy for Open-Meteo endpoints (reverse geocode + forecast) --- */
+app.get('/api/proxy/openmeteo', async (req, res) => {
+  try {
+    const target = String(req.query.url || '');
+    const ok = /^https:\/\/(geocoding-api|api)\.open-meteo\.com\//.test(target);
+    if (!ok) return res.status(400).json({ error: 'invalid_target' });
+
+    const r = await fetchWithTimeout(target, { headers: UA_HEADERS }, 12000);
+    const contentType = r.headers.get('content-type') || 'application/json';
+    const text = await r.text();
+    res.status(r.status).setHeader('Content-Type', contentType).send(text);
+  } catch {
+    res.status(502).json({ error: 'proxy_failed' });
   }
 });
 
@@ -753,6 +800,207 @@ Endpoints:
   /api/tts (POST JSON {text, voice})
   /api/stt (POST multipart: audio=<webm>)
   /api/state (GET/POST)`) });
+
+/* ------------------------------------------------------------------ */
+/* News (today-only, free sources)                                    */
+/* ------------------------------------------------------------------ */
+const newsParser = new Parser({ headers: UA_HEADERS });
+
+const FEEDS = {
+  tech: [
+    'https://www.theverge.com/rss/index.xml',
+    'https://feeds.arstechnica.com/arstechnica/index',
+    'https://techcrunch.com/feed/'
+  ],
+  finance: [
+    'https://feeds.reuters.com/reuters/marketsNews',
+    'https://www.cnbc.com/id/100003114/device/rss/rss.html',
+    'https://feeds.marketwatch.com/marketwatch/topstories/'
+  ],
+  ir: [
+    'https://feeds.reuters.com/reuters/worldNews',
+    'http://feeds.bbci.co.uk/news/world/rss.xml',
+    'https://www.aljazeera.com/xml/rss/all.xml',
+    'https://feeds.npr.org/1004/rss.xml'
+  ],
+  trends: [
+    'https://trends.google.com/trending/rss?geo=US',
+    'https://knowyourmeme.com/newsfeed.rss'
+  ],
+  research: [
+    'https://export.arxiv.org/rss/cs.LG',
+    'https://export.arxiv.org/rss/cs.CV'
+  ]
+};
+
+const ALLOW_HOSTS = {
+  tech: new Set(['theverge.com','arstechnica.com','techcrunch.com']),
+  finance: new Set(['reuters.com','cnbc.com','marketwatch.com']),
+  ir: new Set(['reuters.com','bbc.co.uk','bbc.com','aljazeera.com','npr.org']),
+  trends: new Set(['trends.google.com','knowyourmeme.com']),
+  research: new Set(['arxiv.org','export.arxiv.org'])
+};
+
+const hostOf = (u='') => { try { return new URL(u).hostname.replace(/^www\./,'') } catch { return '' } };
+const canonical = (u='') => {
+  try {
+    const x = new URL(u);
+    ['utm_source','utm_medium','utm_campaign','utm_term','utm_content','ncid'].forEach(k=>x.searchParams.delete(k));
+    x.hash = '';
+    return x.toString();
+  } catch { return u }
+};
+const dedupeByUrl = (items=[])=>{
+  const seen=new Set();
+  return items.filter(it=>{
+    const k=canonical(it.link||it.url||'');
+    if(!k||seen.has(k)) return false;
+    seen.add(k);
+    it.url=k;
+    return true;
+  });
+};
+
+function ymdInTZ(date, tz='America/Chicago'){
+  const parts = new Intl.DateTimeFormat('en-US', { timeZone: tz, year:'numeric', month:'2-digit', day:'2-digit' })
+    .formatToParts(new Date(date))
+    .reduce((a,p)=>{ a[p.type]=p.value; return a; }, {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+function onlyToday(items, tz='America/Chicago', todayYmd=ymdInTZ(new Date(), tz)){
+  return (items||[]).filter(it=>{
+    const d = it.isoDate || it.pubDate || it.pubdate || it.date;
+    if (!d) return false;
+    return ymdInTZ(d, tz) === todayYmd;
+  });
+}
+async function pullFeed(url){
+  try{
+    const feed = await newsParser.parseURL(url);
+    return (feed.items||[]).map(i=>({
+      title: i.title || i.link || url,
+      url: canonical(i.link || i.id || ''),
+      pubDate: i.isoDate || i.pubDate || i.pubdate || i.date || null
+    })).filter(x=>x.url);
+  }catch{ return [] }
+}
+async function collectSection(section, max=8){
+  const urls = FEEDS[section] || [];
+  const allow = ALLOW_HOSTS[section] || new Set();
+  const today = ymdInTZ(new Date(), 'America/Chicago');
+
+  const all = (await Promise.all(urls.map(pullFeed))).flat();
+  const clean = dedupeByUrl(onlyToday(all, 'America/Chicago', today))
+    .filter(it=> allow.has(hostOf(it.url)));
+  clean.sort((a,b)=> new Date(b.pubDate) - new Date(a.pubDate));
+  return clean.slice(0, max);
+}
+
+app.get('/api/news/today', async (_req, res) => {
+  try {
+    const [tech, finance, ir, trends, research] = await Promise.all([
+      collectSection('tech', 8),
+      collectSection('finance', 8),
+      collectSection('ir', 8),
+      collectSection('trends', 8),
+      collectSection('research', 8)
+    ]);
+    const tz = 'America/Chicago';
+    const today = ymdInTZ(new Date(), tz);
+    res.json({ ok:true, tz, today, sections: { tech, finance, ir, trends, research } });
+  } catch (e) {
+    res.status(500).json({ ok:false, error:'news_fetch_failed', detail:String(e) });
+  }
+});
+
+/* --- optional: quick route list to verify it's mounted --- */
+app.get('/api/debug/routes', (_req,res)=>{
+  const routes = (app._router?.stack||[])
+    .filter(l=>l.route && l.route.path)
+    .map(l=>({ method:Object.keys(l.route.methods)[0]?.toUpperCase(), path:l.route.path }));
+  res.json(routes);
+});
+/* ------------------------------------------------------------------ */
+/* Summary (robust: LLM first, then graceful fallback)                 */
+/* ------------------------------------------------------------------ */
+app.get('/api/summary', async (req, res) => {
+  const url = String(req.query.url || '');
+  const model = String(req.query.model || '') || ACTIVE_MODEL;
+  if (!isHttpUrl(url)) {
+    return res.status(400).json({ ok: false, error: 'Valid http(s) url required' });
+  }
+
+  // tiny helpers for fallback summarization
+  const pickSentences = (txt = '', maxChars = 800) => {
+    const clean = String(txt).replace(/\s+/g, ' ').trim();
+    if (!clean) return [];
+    // naive sentence split
+    const parts = clean.split(/(?<=[.!?])\s+/).filter(Boolean);
+    const out = [];
+    let used = 0;
+    for (const s of parts) {
+      if (used + s.length > maxChars) break;
+      out.push(s);
+      used += s.length + 1;
+      if (out.length >= 5) break; // keep it tight
+    }
+    return out;
+  };
+  const bulletsFromText = (txt = '') =>
+    pickSentences(txt, 900).map(s => `• ${s}`).join('\n');
+
+  try {
+    // 1) Extract readable article text
+    const { title, textContent } = await extractReadable(url);
+    const body = textContent && textContent.length > 0
+      ? textContent
+      : 'No article body detected. Use metadata (title/description) to summarize at a high level.';
+
+    // 2) Try LLM with a tighter timeout so we don't hang the UI
+    const llmPrompt = `Summarize with concise bullet points (max 6) and a one-line takeaway.
+TITLE: ${title}
+SOURCE: ${url}
+TEXT: ${trimText(body, 10000)}`;
+
+    let summary = '';
+    let usedModel = model;
+    let fallback = false;
+
+    try {
+      // shorter overall timeout by racing the model call
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 28000); // ~28s hard cap
+      summary = await ollamaChat({
+        system: 'You are Xenya, a concise analyst. Output tight bullets and a short takeaway.',
+        messages: [{ role: 'user', content: llmPrompt }],
+        model: usedModel,
+        temperature: 0.2
+      });
+      clearTimeout(timer);
+      if (!summary || !summary.trim()) throw new Error('empty_summary');
+    } catch {
+      // 3) Fallback: deterministic, zero-LLM summary
+      const bullets = bulletsFromText(body);
+      const takeaway = title ? `Takeaway: ${title}` : '';
+      summary = [bullets, takeaway].filter(Boolean).join('\n\n');
+      fallback = true;
+      usedModel = 'fallback';
+    }
+
+    return res.json({ ok: true, title, url, summary, model: usedModel, fallback });
+  } catch (err) {
+    // Last-resort fallback: return minimal info, never throw 500 for client UX
+    return res.json({
+      ok: true,
+      title: url,
+      url,
+      summary: 'Quick take: could not fetch or parse the article body. Open the link for details.',
+      model: 'fallback',
+      fallback: true,
+      note: String(err || '')
+    });
+  }
+});
 
 /* ------------------------------------------------------------------ */
 /* Listen                                                             */
