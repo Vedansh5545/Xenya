@@ -1,0 +1,42 @@
+{
+  "jobs": [
+    {
+      "title": "Ai Engineer",
+      "jd_struct": {
+        "title": "Ai Engineer",
+        "level": "junior",
+        "location": "Engineering, IT",
+        "visa": "optimizing code for high-performance AI models",
+        "visa_status": "friendly",
+        "skills_must": [
+          "python",
+          "aws",
+          "azure",
+          "git",
+          "java",
+          "c++",
+          "go",
+          "ros"
+        ],
+        "skills_nice": [],
+        "responsibilities": [],
+        "keywords": [
+          "ai",
+          "engineer",
+          "python",
+          "aws",
+          "azure",
+          "git",
+          "java",
+          "c++",
+          "go",
+          "ros"
+        ]
+      },
+      "score": 0.5100000000000001,
+      "stage": "inbox",
+      "id": "job_mhnr54c4",
+      "created_at": "2025-11-06T18:20:20.404Z"
+    }
+  ]
+}

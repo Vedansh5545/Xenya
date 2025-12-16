@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'            // ← ADDED
 import './theme.css'
 import Notes from './components/Notes.jsx'
 import MarkdownMessage from './components/MarkdownMessage.jsx'
@@ -380,7 +381,7 @@ function Dispatch({ items=[] }){
 }
 
 /* --- Action Dock (Notes + Productivity + Jobs) --- */
-function ActionDock({ onOpenNotes, onOpenProd, onOpenJobs, onOpenTodo }) {
+function ActionDock({ onOpenNotes, onOpenProd, onOpenJobs, onOpenTodo, onOpenReader }) {  // ← ADDED onOpenReader
   const [hidden, setHidden] = useState(false);
 
   return (
@@ -414,6 +415,11 @@ function ActionDock({ onOpenNotes, onOpenProd, onOpenJobs, onOpenTodo }) {
           </button>
           <button className="fab" onClick={onOpenTodo} aria-label="Open To-Do">
             <span className="ico">🗒️</span> To-Do
+          </button>
+
+          {/* NEW: Read button */}
+          <button className="fab" onClick={onOpenReader} aria-label="Open Reader">
+            <span className="ico">📖</span> Read
           </button>
         </div>
         <button className="secret" title={hidden ? 'Show quick actions' : 'Hide quick actions'} onClick={()=>setHidden(v=>!v)} />
@@ -466,6 +472,7 @@ export default function App(){
 
   const endRef = useRef(null)
   const logoRef = useRef(null)
+  const navigate = useNavigate()                    // ← ADDED
 
   const activeChat = useMemo(
     () => chats.find(c=>c.id===activeId) || { id:activeId, title:'New chat', messages:[], role: roleText },
@@ -1170,7 +1177,7 @@ Tip: use /events week local to see ids.` })
         onOpenProd={()=>setKanbanOpen(true)}
         onOpenJobs={()=> window.jobsDock?.open?.('inbox')}
         onOpenTodo={()=>window.todoDock?.open?.('list')}
-
+        onOpenReader={()=>navigate('/reader')}        // ← ADDED
       />
 
       {/* Sidebar */}
