@@ -1,18 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'            // ← ADDED
+import { useNavigate } from 'react-router-dom'
 import './theme.css'
-import Notes from './components/Notes.jsx'
 import MarkdownMessage from './components/MarkdownMessage.jsx'
 import { chat, research, summarizeUrl, rss, listModels, selectModel, refreshModels } from './lib/api'
 import TTSControls from './components/TTSControls.jsx'
 import { speak } from './lib/tts/speak'
 import Logo from './components/Logo.jsx'
-import ChatBox from './components/ChatBox.jsx'   // compact composer (Talk + Send)
+import ChatBox from './components/ChatBox.jsx'
 import XenyaProductivitySuite from "./components/XenyaProductivitySuite.jsx";
-import { addKanbanTask, moveKanbanTaskByTitle } from './components/MiniKanban.jsx'  // Kanban helper APIs
+import { addKanbanTask, moveKanbanTaskByTitle } from './components/MiniKanban.jsx'
 import QuickCapture from './components/QuickCapture.jsx';
 import JobsDock from "./components/jobs/JobsDock.jsx";
 import TodoDock from "./components/todo/TodoDock.jsx";
+import NotesPopup from "./components/NotesPopup.jsx";
+
+// Chart.js (inline report charts)
+import { Bar } from 'react-chartjs-2'
+import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from 'chart.js'
+ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
+
 /* ---------- Tone & Microcopy ---------- */
 const TONE = {
   motto: "Consider it sorted.",
@@ -77,12 +83,11 @@ function filterCitations(cites = []) {
       if (BAD_DOMAIN.test(host)) continue
       if (seen.has(host)) continue
       seen.add(host)
-      good.push({ title: c.title || host, url: c.url })
+      good.push({ title: c.title || host, url: c.url, host })
     } catch {}
   }
   return good
 }
-
 
 /* ---------- Mic status normalizer ---------- */
 function normalizeMicStatus(s) {
@@ -108,7 +113,6 @@ const readLocalEvents = () => {
 }
 const writeLocalEvents = (items) => {
   localStorage.setItem(LOCAL_CAL_KEY, JSON.stringify(items || []))
-  // ping the UI (same tab) that data changed
   window.dispatchEvent(new CustomEvent('calendar:changed'))
 }
 
@@ -156,7 +160,7 @@ function parseRange(arg){
   const now = new Date()
   const word = (arg || '').toLowerCase().trim()
   if (!arg || word === 'week') {
-    const day = now.getDay() // 0..6 (Sun..Sat)
+    const day = now.getDay()
     const mondayOffset = (day + 6) % 7
     const start = clampDayStart(new Date(now.getFullYear(), now.getMonth(), now.getDate() - mondayOffset))
     const end = clampDayEnd(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 6))
@@ -171,14 +175,12 @@ function parseRange(arg){
     const end = clampDayEnd(new Date(now.getFullYear(), now.getMonth()+1, 0))
     return { label:'month', start, end }
   }
-  // ISO range
   const m = String(arg).match(/(\d{4}-\d{2}-\d{2})\.\.(\d{4}-\d{2}-\d{2})/)
   if (m) {
     const start = clampDayStart(new Date(m[1]))
     const end   = clampDayEnd(new Date(m[2]))
     return { label:`${m[1]}..${m[2]}`, start, end }
   }
-  // Fallback: treat as week
   const start = clampDayStart(now); const end = clampDayEnd(new Date(now.getTime()+6*864e5))
   return { label:'week', start, end }
 }
@@ -196,7 +198,6 @@ async function outlookUpcoming(fromISO, toISO, tz = tzGuess()){
     const r = await fetch(`${API_ORIGIN}/calendar/upcoming?${qs}`, { credentials:'include' })
     if(!r.ok) return []
     const data = await r.json()
-    // map to unified shape
     const arr = Array.isArray(data) ? data : (data.value || [])
     return arr.map(ev => ({
       id: ev.id,
@@ -224,7 +225,6 @@ function renderEventsMarkdown(events, title='Events'){
 }
 
 function parseKVFlags(s){
-  // parses loc:"Room A" notes:"something" (both optional)
   const res = {}
   const rx = /\b(loc|location|notes|tz):"([^"]*)"/gi
   let m; while((m = rx.exec(s))) {
@@ -260,8 +260,8 @@ async function routeMessage(content, model, history, rolePrompt){
       tables,
       chart,
       error: r?.error || null
-    }}
-
+    }
+  }
 
   if (isUrl(t)) {
     try {
@@ -269,7 +269,7 @@ async function routeMessage(content, model, history, rolePrompt){
       const summary = r?.summary || r?.bullets?.map(b=>`• ${b}`).join('\n') || '(no summary)'
       let host = ''
       try { host = new URL(t).hostname } catch {}
-      const cit = [{ url: t, title: r?.title || host }]
+      const cit = [{ url: t, title: r?.title || host, host }]
       return { role:'assistant', type:'report', reportTitle:`URL Summary: ${host || 'Link'}`, content: summary, citations: cit }
     } catch (e) {
       return { role:'assistant', content: `Couldn’t summarize that page (${e.message}). Want me to research it instead? Try: /research ${t}` }
@@ -290,11 +290,6 @@ async function routeMessage(content, model, history, rolePrompt){
 }
 
 /* ---------- Inline cards ---------- */
-// In App.jsx — drop-in replacement for ReportCard
-import { Bar } from 'react-chartjs-2'
-import { Chart as ChartJS, BarElement, CategoryScale, LinearScale, Tooltip, Legend } from 'chart.js'
-ChartJS.register(BarElement, CategoryScale, LinearScale, Tooltip, Legend)
-
 function ReportCard({ title, bodyMd, citations=[], images=[], tables=[], chart=null, err }){
   return (
     <div className="report-card rounded-2xl p-4 md:p-6 bg-black/30 border border-white/10 shadow-xl space-y-5">
@@ -303,16 +298,13 @@ function ReportCard({ title, bodyMd, citations=[], images=[], tables=[], chart=n
         {err && <span className="text-amber-400 text-sm">⚠ {err}</span>}
       </div>
 
-      {/* Summary */}
       <MarkdownMessage text={bodyMd || '_No summary returned._'} />
 
-      {/* Images */}
       {images?.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
           {images.map((im, i) => (
             <a key={i} href={im.source} target="_blank" rel="noreferrer"
                className="group block rounded-xl overflow-hidden bg-white/5 border border-white/10">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={im.url} alt={im.title||'image'} className="w-full h-36 object-cover group-hover:opacity-90 transition" />
               <div className="px-2 py-1 text-xs opacity-70 truncate">{im.title || im.source}</div>
             </a>
@@ -320,7 +312,6 @@ function ReportCard({ title, bodyMd, citations=[], images=[], tables=[], chart=n
         </div>
       )}
 
-      {/* Tables */}
       {tables?.map((t, idx)=>(
         <div key={idx} className="overflow-auto rounded-xl border border-white/10">
           <div className="px-3 py-2 text-sm font-medium bg-white/5 border-b border-white/10">{t.title}</div>
@@ -339,17 +330,18 @@ function ReportCard({ title, bodyMd, citations=[], images=[], tables=[], chart=n
         </div>
       ))}
 
-      {/* Chart */}
       {chart && chart.labels?.length > 0 && (
         <div className="rounded-xl border border-white/10 p-3">
-          <Bar data={{
-            labels: chart.labels,
-            datasets: chart.series.map(s => ({ label: s.label, data: s.data }))
-          }} options={{ responsive: true, plugins: { legend: { display: true }}}} />
+          <Bar
+            data={{
+              labels: chart.labels,
+              datasets: chart.series.map(s => ({ label: s.label, data: s.data }))
+            }}
+            options={{ responsive: true, plugins: { legend: { display: true }}}}
+          />
         </div>
       )}
 
-      {/* Citations */}
       {citations?.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {citations.map((c,i)=>(
@@ -363,7 +355,6 @@ function ReportCard({ title, bodyMd, citations=[], images=[], tables=[], chart=n
     </div>
   )
 }
-
 
 function Dispatch({ items=[] }){
   return (
@@ -380,8 +371,8 @@ function Dispatch({ items=[] }){
   )
 }
 
-/* --- Action Dock (Notes + Productivity + Jobs) --- */
-function ActionDock({ onOpenNotes, onOpenProd, onOpenJobs, onOpenTodo, onOpenReader }) {  // ← ADDED onOpenReader
+/* --- Action Dock (Productivity + Jobs + ToDo + Read + Notes) --- */
+function ActionDock({ onOpenNotes, onOpenProd, onOpenJobs, onOpenTodo, onOpenReader }) {
   const [hidden, setHidden] = useState(false);
 
   return (
@@ -399,27 +390,26 @@ function ActionDock({ onOpenNotes, onOpenProd, onOpenJobs, onOpenTodo, onOpenRea
                 backdrop-filter:blur(6px); color:#ddd; cursor:pointer; position:relative; overflow:hidden;}
         .secret::after{content:''; position:absolute; inset:-60%; background:conic-gradient(from 0deg, transparent 0 80%, rgba(122,62,255,.45) 82% 100%);
                        transform:rotate(0deg); animation:spin 4.5s linear infinite; opacity:.25}
+        @keyframes spin{to{transform:rotate(360deg)}}
       `}</style>
 
       <div id="x-dock" className={`dock ${hidden ? 'dock-hidden' : ''}`}>
         <div className="dock-items">
-          <button className="fab" data-xdock="notes" onClick={onOpenNotes} aria-label="Open Notes">
-            <span className="ico">＋</span> Notes
-          </button>
           <button className="fab" onClick={onOpenProd} aria-label="Open Productivity">
             <span className="ico">⚡</span> Productivity
           </button>
-          {/* New Jobs button (same style) */}
           <button className="fab" onClick={onOpenJobs} aria-label="Open Jobs">
             <span className="ico">💼</span> Jobs
           </button>
           <button className="fab" onClick={onOpenTodo} aria-label="Open To-Do">
             <span className="ico">🗒️</span> To-Do
           </button>
-
-          {/* NEW: Read button */}
           <button className="fab" onClick={onOpenReader} aria-label="Open Reader">
             <span className="ico">📖</span> Read
+          </button>
+          {/* Notes button BELOW Read */}
+          <button className="fab" onClick={onOpenNotes} aria-label="Open Notes">
+            <span className="ico">📝</span> Notes
           </button>
         </div>
         <button className="secret" title={hidden ? 'Show quick actions' : 'Hide quick actions'} onClick={()=>setHidden(v=>!v)} />
@@ -427,7 +417,6 @@ function ActionDock({ onOpenNotes, onOpenProd, onOpenJobs, onOpenTodo, onOpenRea
     </>
   );
 }
-
 
 /* ---------- App ---------- */
 export default function App(){
@@ -470,13 +459,16 @@ export default function App(){
   // Productivity Suite modal
   const [kanbanOpen, setKanbanOpen] = useState(false)
 
+  // Notes popup
+  const [notesOpen, setNotesOpen] = useState(false)
+
   const endRef = useRef(null)
   const logoRef = useRef(null)
-  const navigate = useNavigate()                    // ← ADDED
+  const navigate = useNavigate()
 
   const activeChat = useMemo(
     () => chats.find(c=>c.id===activeId) || { id:activeId, title:'New chat', messages:[], role: roleText },
-    [chats, activeId]
+    [chats, activeId, roleText]
   )
 
   // ------------- Timer/Pomodoro storage helpers (shared with FocusTimer) -------------
@@ -491,6 +483,12 @@ export default function App(){
   const timerState = () => readJSON(TIMER_LS_STATE, { running:false, mode:'idle', totalMs:0, remainingMs:0 })
   const setTimerState = (patch) => { const next = { ...timerState(), ...patch }; writeJSON(TIMER_LS_STATE, next); return next }
   const readKanban = () => { try{ const db = JSON.parse(localStorage.getItem(KANBAN_LS))||{tasks:[]}; return Array.isArray(db.tasks)? db.tasks:[] }catch{ return [] } }
+
+  const clampSafeInt = (v, min, max) => {
+    const n = parseInt(String(v).replace(/[^\d-]/g,''), 10)
+    if (Number.isFinite(n)) return Math.max(min, Math.min(max, n))
+    return min
+  }
 
   // “Bounce” (remount) the Productivity Suite so the FocusTimer picks up external state changes immediately
   const bounceProductivity = () => {
@@ -535,7 +533,7 @@ export default function App(){
   }, [chats, activeId])
 
   // load role when switching chats
-  useEffect(()=>{ setRoleText(activeChat.role || roleText) },[activeId])
+  useEffect(()=>{ setRoleText(activeChat.role || roleText) },[activeId]) // eslint-disable-line
 
   // autoscroll
   useEffect(()=>{ endRef.current?.scrollIntoView({behavior:'smooth'}) },[activeChat.messages, busy])
@@ -544,8 +542,8 @@ export default function App(){
   const newChat = ()=>{
     const taken = new Set(chats.map(c => c.id))
     const id = makeId(taken)
-    const chat = { id, title:'New chat', messages:[], role: roleText }
-    setChats(prev=>{ const next=[chat, ...prev]; saveChats(next); return next })
+    const chat0 = { id, title:'New chat', messages:[], role: roleText }
+    setChats(prev=>{ const next=[chat0, ...prev]; saveChats(next); return next })
     setActiveId(id)
     setLastCreatedId(id)
     requestAnimationFrame(()=>{
@@ -557,7 +555,6 @@ export default function App(){
   const titleFromFirstUser = (chat) => {
     const first = chat?.messages?.find(m=>m.role==='user')?.content || 'New chat'
     return first.length>28 ? first.slice(0,28)+'…' : first
-
   }
 
   // toast
@@ -617,42 +614,6 @@ export default function App(){
     })
   }
 
-  // Hide the original Notes FAB so we only show the dock version
-  useEffect(()=>{
-    const dock = () => document.getElementById('x-dock');
-
-    const hideOriginalNotes = ()=>{
-      const d = dock();
-      const nodes = Array.from(document.querySelectorAll('button, a'));
-      // Match visible Notes buttons NOT inside our dock
-      const notesBtns = nodes.filter(el => {
-        const text = (el.textContent || '').trim();
-        if (!/notes/i.test(text)) return false;
-        if (d && d.contains(el)) return false;          // <- skip our dock buttons
-        return true;
-      });
-      // Hide all original Notes triggers we find (idempotent)
-        notesBtns.forEach(el => {
-        if (el.dataset.xHideDone) return;
-        el.dataset.xHideDone = '1';
-        el.style.display = 'none';
-      });
-    };
-
-    hideOriginalNotes();
-    const mo = new MutationObserver(() => hideOriginalNotes());
-    mo.observe(document.body, { childList:true, subtree:true });
-    return ()=>mo.disconnect();
-  },[]);
-
-  // Bridge to Notes: click the existing Notes trigger if present, else fire a custom event
-  const openNotesViaExisting = ()=>{
-    const candidates = Array.from(document.querySelectorAll('button, a'))
-    const btn = candidates.find(el => /notes/i.test((el.textContent||'').trim()))
-    if (btn) { btn.click(); return; }
-    window.dispatchEvent(new CustomEvent('notes:open'))
-  }
-
   /* ======= SEND helpers ======= */
   const sendFromText = async (text) => {
     const content = (text || '').trim()
@@ -677,7 +638,6 @@ export default function App(){
         })
       }
 
-      // ---- helpers
       const helpTimer = () => reply(
 `**Timer commands**
 - /timer start [minutes]
@@ -696,12 +656,11 @@ export default function App(){
 - /pomodoro link "<task substring>" [inbox|doing]
 - /pomodoro open`)
 
-      // timer primitives (writes LS; FocusTimer picks up on mount/remount)
       const startSimple = (mins) => {
         const m = Math.max(1, Math.round(mins || timerCfg().simpleM || 20))
         const startAt = nowMs()
         const total = m * 60_000
-        setTimerCfg({ mode:'timer', simpleM:m })  // remember choice
+        setTimerCfg({ mode:'timer', simpleM:m })
         setTimerState({
           running:true, mode:'simple', totalMs: total, remainingMs: total,
           startAt, endAt: startAt + total, linked: timerState().linked || null
@@ -763,21 +722,15 @@ export default function App(){
         reply(`🍃 ${kind==='long'?'Long ':''}Break started for **${mins} min**.`)
       }
 
-      // ---- parse
       if (/^\/timer\b/i.test(content)) {
         const s = content.replace(/^\/timer\s*/i,'').trim()
 
         if (s === '' || /^help$/i.test(s)) return helpTimer()
-
-        // open
         if (/^open$/i.test(s)) { setKanbanOpen(true); return reply('Opened Productivity Suite.'); }
 
-        // sound
         let m = s.match(/^sound\s+(alarm|buzzer|bell|none)$/i)
-        if (m) { const choice = m[1].toLowerCase(); setTimerCfg({ timerEndSound: choice })
-          return reply(`🔔 Timer end sound → **${choice}**`) }
+        if (m) { const choice = m[1].toLowerCase(); setTimerCfg({ timerEndSound: choice }); return reply(`🔔 Timer end sound → **${choice}**`) }
 
-        // start [minutes]
         m = s.match(/^start(?:\s+(\d+))?$/i)
         if (m) { const mins = m[1] ? parseInt(m[1],10) : undefined; return startSimple(mins) }
 
@@ -785,7 +738,6 @@ export default function App(){
         if (/^resume$/i.test(s)) return resumeSimpleOrPom()
         if (/^stop$/i.test(s)) return stopAny()
         if (/^status$/i.test(s)) return statusAny()
-
         return helpTimer()
       }
 
@@ -793,11 +745,8 @@ export default function App(){
         const s = content.replace(/^\/pomodoro\s*/i,'').trim()
 
         if (s === '' || /^help$/i.test(s)) return helpPom()
-
-        // open
         if (/^open$/i.test(s)) { setKanbanOpen(true); return reply('Opened Productivity Suite.'); }
 
-        // presets
         let m = s.match(/^preset\s+(classic|study|balanced|ultra)$/i)
         if (m) {
           const p = m[1].toLowerCase()
@@ -812,7 +761,6 @@ export default function App(){
           return reply(`Preset **${p}** loaded.`)
         }
 
-        // set focus=.. break=.. long=.. every=.. auto=on|off
         m = s.match(/^set\s+(.+)$/i)
         if (m) {
           const args = m[1]
@@ -832,12 +780,9 @@ export default function App(){
           return reply(`Pomodoro settings updated.`)
         }
 
-        // sound
         m = s.match(/^sound\s+(chime|woodblock|bell|none)$/i)
-        if (m) { const choice = m[1].toLowerCase(); setTimerCfg({ pomodoroEndSound: choice })
-          return reply(`🔔 Pomodoro end sound → **${choice}**`) }
+        if (m) { const choice = m[1].toLowerCase(); setTimerCfg({ pomodoroEndSound: choice }); return reply(`🔔 Pomodoro end sound → **${choice}**`) }
 
-        // ambience
         m = s.match(/^ambience\s+(cafe|pianoguitar|beach|rain|fireplace)(?:\s+(on|off))?(?:\s+vol=(\d{1,3}))?(?:\s+where=(focus|break|both))?$/i)
         if (m) {
           const type = m[1].toLowerCase()
@@ -856,7 +801,6 @@ export default function App(){
           return reply(`🎧 Ambience **${type}**${onoff?` (${onoff})`:''}${volNum!==null?` · vol ${volNum}%`:''}${where?` · ${where}`:''}.`)
         }
 
-        // link "<substring>" [inbox|doing]
         m = s.match(/^link\s+["“](.+?)["”](?:\s+(inbox|doing))?$/i)
         if (m) {
           const substr = m[1].toLowerCase()
@@ -870,7 +814,6 @@ export default function App(){
           return reply(`No task matching “${m[1]}” in ${col}.`)
         }
 
-        // start [focus|break|short|long]
         m = s.match(/^start(?:\s+(focus|break|short|long))?$/i)
         if (m) {
           const kind = (m[1]||'focus').toLowerCase()
@@ -879,7 +822,6 @@ export default function App(){
           if (kind==='long') return startBreak('long')
         }
 
-        // explicit break command
         m = s.match(/^break(?:\s+(short|long))?$/i)
         if (m) { return startBreak((m[1]||'short').toLowerCase()) }
 
@@ -897,7 +839,6 @@ export default function App(){
     /* ---------- Calendar: /events ---------- */
     if (/^\/events\b/i.test(content)) {
       try{
-        // parse: /events [today|week|month|YYYY-MM-DD..YYYY-MM-DD] [local|outlook]
         const args = content.replace(/^\/events\s*/i,'').trim()
         const parts = args.split(/\s+/).filter(Boolean)
         const rangeToken = parts[0] && !/^(local|outlook)$/i.test(parts[0]) ? parts[0] : ''
@@ -957,7 +898,6 @@ Tip: use /events week local to see ids.` })
       try{
         const s = content
 
-        // ADD
         let m = s.match(/\/cal\s+add\s+(['"])(.+?)\1\s+(\S+)\.\.(\S+)(.*)$/i)
         if (m) {
           const [, , title, startStr, endStr, tail] = m
@@ -979,7 +919,6 @@ Tip: use /events week local to see ids.` })
           return
         }
 
-        // RENAME
         m = s.match(/\/cal\s+rename\s+(\S+)\s+(['"])(.+?)\2/i)
         if (m) {
           const [, id, , newTitle] = m
@@ -993,7 +932,6 @@ Tip: use /events week local to see ids.` })
           return
         }
 
-        // MOVE / EDIT TIMES
         m = s.match(/\/cal\s+(move|edit)\s+(\S+)\s+(\S+)\.\.(\S+)/i)
         if (m) {
           const [, , id, startStr, endStr] = m
@@ -1007,7 +945,6 @@ Tip: use /events week local to see ids.` })
           return
         }
 
-        // DELETE
         m = s.match(/\/cal\s+delete\s+(\S+)/i)
         if (m) {
           const [, id] = m
@@ -1021,7 +958,6 @@ Tip: use /events week local to see ids.` })
           return
         }
 
-        // HELP (fallback)
         setChats(prev=>{
           const aMsg = help()
           const titled = titleFromFirstUser(prev.find(c=>c.id===activeId))
@@ -1114,12 +1050,6 @@ Tip: use /events week local to see ids.` })
     }
   }
 
-  const clampSafeInt = (v, min, max) => {
-    const n = parseInt(String(v).replace(/[^\d-]/g,''), 10)
-    if (Number.isFinite(n)) return Math.max(min, Math.min(max, n))
-    return min
-  }
-
   const send = async () => { if (!input.trim()) return; await sendFromText(input) }
 
   // Mic transcript + status
@@ -1165,19 +1095,21 @@ Tip: use /events week local to see ids.` })
     <div className="shell">
       {/* Global Quick Capture overlay (⌘/Ctrl+J) */}
       <QuickCapture />
-      {/* Notes still mounts; its original FAB is hidden by the effect above */}
-      <Notes/>
-      {/* Jobs Dock (opens from the dock's Jobs button; also has its own hotkey by default) */}
+
+      {/* Jobs Dock */}
       <JobsDock initialOpen={false} />
       <TodoDock />
 
-      {/* Unified action dock (Notes + Productivity + Jobs) */}
+      {/* Notes Popup (new feature) */}
+      <NotesPopup open={notesOpen} onClose={() => setNotesOpen(false)} />
+
+      {/* Unified action dock */}
       <ActionDock
-        onOpenNotes={openNotesViaExisting}
+        onOpenNotes={() => setNotesOpen(true)}
         onOpenProd={()=>setKanbanOpen(true)}
         onOpenJobs={()=> window.jobsDock?.open?.('inbox')}
         onOpenTodo={()=>window.todoDock?.open?.('list')}
-        onOpenReader={()=>navigate('/reader')}        // ← ADDED
+        onOpenReader={()=>navigate('/reader')}
       />
 
       {/* Sidebar */}
@@ -1285,14 +1217,14 @@ Tip: use /events week local to see ids.` })
             <div key={i} className={m.role}>
               {m.type === 'report' ? (
                 <ReportCard
-                 title={m.reportTitle || 'Report'}
-                 bodyMd={m.content}
-                 citations={m.citations || m.cites || []}
-                 images={m.images || []}
-                 tables={m.tables || []}
-                 chart={m.chart || null}
-                 err={m.error}
-               />
+                  title={m.reportTitle || 'Report'}
+                  bodyMd={m.content}
+                  citations={m.citations || m.cites || []}
+                  images={m.images || []}
+                  tables={m.tables || []}
+                  chart={m.chart || null}
+                  err={m.error}
+                />
               ) : m.type === 'dispatch' ? (
                 <Dispatch items={m.items || []} />
               ) : (
@@ -1333,7 +1265,7 @@ Tip: use /events week local to see ids.` })
         />
       </main>
 
-      {/* Productivity Popup: Productivity Suite */}
+      {/* Productivity Popup */}
       <XenyaProductivitySuite open={kanbanOpen} onClose={()=>setKanbanOpen(false)} />
 
       {/* Delete confirmation modal */}
