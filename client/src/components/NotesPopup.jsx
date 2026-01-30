@@ -11,8 +11,8 @@ import {
 
 import {
   fetchAiModels,
-  runNotesAiAndSave,
   runNotesAiCustomAndSave,
+  runNotesAiAndApply,
 } from './notesai.js'
 
 export default function NotesPopup({ open, onClose }) {
@@ -28,11 +28,19 @@ export default function NotesPopup({ open, onClose }) {
   const textareaRef = useRef(null)
 
   // ===== AI state =====
-  const [aiOpen, setAiOpen] = useState(true)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiPrompt, setAiPrompt] = useState('')
   const [aiModel, setAiModel] = useState('')
   const [aiModels, setAiModels] = useState([])
+
+  // where AI writes
+  const [aiTarget, setAiTarget] = useState('append') // replace | append | new
+
+  // ✅ Floating AI window state
+  const [aiFloatOpen, setAiFloatOpen] = useState(false)
+  const [aiFloatMin, setAiFloatMin] = useState(false)
+  const [aiPos, setAiPos] = useState({ x: 520, y: 160 })
+  const dragRef = useRef({ dragging: false, dx: 0, dy: 0 })
 
   // sync on storage updates
   useEffect(() => {
@@ -106,7 +114,7 @@ export default function NotesPopup({ open, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  // Load AI models when popup opens (or when first time)
+  // Load AI models when popup opens
   useEffect(() => {
     if (!open) return
     ;(async () => {
@@ -115,9 +123,17 @@ export default function NotesPopup({ open, onClose }) {
         setAiModels(r.models || [])
         setAiModel(r.active || (r.models?.[0]?.name || ''))
       } catch {
-        // ignore; panel will still show
+        // ignore
       }
     })()
+  }, [open])
+
+  // Reset floating AI position when opening popup (nice default)
+  useEffect(() => {
+    if (!open) return
+    setAiFloatOpen(false)
+    setAiFloatMin(false)
+    setAiPos({ x: 520, y: 160 })
   }, [open])
 
   const onNewNotebook = () => {
@@ -194,7 +210,7 @@ export default function NotesPopup({ open, onClose }) {
   }
 
   /* =========================
-     WORD-LIKE TOOLBAR ACTIONS
+     TOOLBAR (unchanged behavior)
      ========================= */
 
   const getSelection = () => {
@@ -389,21 +405,31 @@ export default function NotesPopup({ open, onClose }) {
   }
 
   /* =========================
-     AI ACTIONS (uses notesai.js)
+     AI HELPERS
      ========================= */
+
+  const defaultTargetForKind = (kind) => {
+    if (kind === 'rewrite') return 'replace'
+    if (kind === 'explain') return 'append'
+    return 'new'
+  }
 
   const runAiKind = async (kind) => {
     if (!activeNotebook || !activeChapter) return
     if (!aiModel) { alert('No model selected.'); return }
 
+    const target = defaultTargetForKind(kind)
+
     setAiBusy(true)
     try {
-      const next = await runNotesAiAndSave({
+      const next = await runNotesAiAndApply({
         notebookId: activeNotebook.id,
-        baseChapterTitle: activeChapter.title,
+        chapterId: activeChapter.id,
+        chapterTitle: activeChapter.title,
         kind,
         notesText: activeChapter.content || '',
         model: aiModel,
+        target,
       })
       setState(next)
       setEditMode('write')
@@ -423,13 +449,27 @@ export default function NotesPopup({ open, onClose }) {
 
     setAiBusy(true)
     try {
-      const next = await runNotesAiCustomAndSave({
-        notebookId: activeNotebook.id,
-        baseChapterTitle: activeChapter.title,
-        userRequest: q,
-        notesText: activeChapter.content || '',
-        model: aiModel,
-      })
+      let next
+      if (aiTarget === 'new') {
+        next = await runNotesAiCustomAndSave({
+          notebookId: activeNotebook.id,
+          baseChapterTitle: activeChapter.title,
+          userRequest: q,
+          notesText: activeChapter.content || '',
+          model: aiModel,
+        })
+      } else {
+        next = await runNotesAiAndApply({
+          notebookId: activeNotebook.id,
+          chapterId: activeChapter.id,
+          chapterTitle: activeChapter.title,
+          userRequest: q,
+          notesText: activeChapter.content || '',
+          model: aiModel,
+          target: aiTarget, // replace | append
+        })
+      }
+
       setState(next)
       setAiPrompt('')
       setEditMode('write')
@@ -441,53 +481,121 @@ export default function NotesPopup({ open, onClose }) {
     }
   }
 
+  /* =========================
+     FLOATING AI DRAG
+     ========================= */
+
+  const onAiDragStart = (e) => {
+    // only left click
+    if (e.button !== 0) return
+    dragRef.current.dragging = true
+    dragRef.current.dx = e.clientX - aiPos.x
+    dragRef.current.dy = e.clientY - aiPos.y
+    e.preventDefault()
+  }
+
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!dragRef.current.dragging) return
+      const nx = e.clientX - dragRef.current.dx
+      const ny = e.clientY - dragRef.current.dy
+      // clamp a bit so it doesn't disappear fully
+      setAiPos({
+        x: Math.max(16, Math.min(window.innerWidth - 340, nx)),
+        y: Math.max(86, Math.min(window.innerHeight - 120, ny)),
+      })
+    }
+    const onUp = () => { dragRef.current.dragging = false }
+
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [aiPos.x, aiPos.y])
+
   if (!open) return null
 
   return (
     <>
       <style>{`
+        :root{
+          --np-bg: rgba(5, 6, 10, .97);
+          --np-bg2: rgba(0,0,0,.40);
+          --np-card: rgba(255,255,255,.04);
+          --np-card2: rgba(255,255,255,.03);
+          --np-border: rgba(255,255,255,.10);
+          --np-border2: rgba(255,255,255,.08);
+          --np-text: rgba(255,255,255,.92);
+          --np-muted: rgba(255,255,255,.68);
+
+          /* ✅ NEW accent: teal/cyan (not purple) */
+          --np-accent: rgba(0, 214, 255, 1);
+          --np-accent2: rgba(0, 214, 255, .16);
+
+          --np-shadow: 0 22px 70px rgba(0,0,0,.65);
+        }
+
         .np-backdrop{
           position:fixed; inset:0; z-index:10060;
-          background:rgba(0,0,0,.45);
-          backdrop-filter: blur(8px);
+          background:rgba(0,0,0,.60);
+          backdrop-filter: blur(10px);
         }
+
+        /* ✅ Bigger popup */
         .np-panel{
-          position:fixed; right:16px; top:72px; bottom:16px;
-          width:min(980px, calc(100vw - 32px));
+          position:fixed;
+          left:24px; right:24px;
+          top:72px; bottom:18px;
           z-index:10070;
-          border:1px solid rgba(255,255,255,.12);
-          border-radius:18px;
-          background:rgba(10,10,16,.92);
-          box-shadow: 0 18px 60px rgba(0,0,0,.55);
+          border:1px solid var(--np-border);
+          border-radius:20px;
+          background: var(--np-bg);
+          box-shadow: var(--np-shadow);
           overflow:hidden;
           display:flex; flex-direction:column;
+          max-width: 1280px;
+          margin: 0 auto;
         }
-        .np-collapsed{ width: 360px; }
+
+        .np-collapsed{
+          max-width: 520px;
+          left:auto;
+          right:24px;
+        }
+
         .np-head{
           display:flex; align-items:center; justify-content:space-between;
           padding:12px 14px;
-          border-bottom:1px solid rgba(255,255,255,.10);
-          background: linear-gradient(180deg, rgba(122,62,255,.22), rgba(0,0,0,0));
+          border-bottom:1px solid var(--np-border);
+          background:
+            radial-gradient(800px 140px at 18% 0%, rgba(0,214,255,.12), transparent 60%),
+            linear-gradient(180deg, rgba(255,255,255,.03), transparent);
         }
-        .np-title{display:flex; gap:10px; align-items:center; font-weight:700}
+
+        .np-title{display:flex; gap:10px; align-items:center; font-weight:900; color: var(--np-text)}
         .np-pill{
-          font-size:12px; opacity:.85;
+          font-size:12px; color: var(--np-muted);
           padding:4px 10px; border-radius:999px;
-          border:1px solid rgba(255,255,255,.14);
-          background:rgba(255,255,255,.06);
+          border:1px solid var(--np-border2);
+          background:rgba(255,255,255,.04);
         }
         .np-actions{display:flex; gap:8px; align-items:center}
+
         .np-btn{
           padding:8px 10px; border-radius:12px;
-          border:1px solid rgba(255,255,255,.14);
-          background:rgba(255,255,255,.06);
-          color:#eee; cursor:pointer;
+          border:1px solid var(--np-border2);
+          background:rgba(255,255,255,.04);
+          color:var(--np-text); cursor:pointer;
+          font-weight:800;
         }
-        .np-btn:hover{background:rgba(255,255,255,.10)}
+        .np-btn:hover{background:rgba(255,255,255,.07)}
         .np-btn.primary{
-          border-color: rgba(122,62,255,.5);
-          background: rgba(122,62,255,.25);
+          border-color: rgba(0,214,255,.40);
+          background: rgba(0,214,255,.12);
         }
+
         .np-body{
           flex:1;
           display:grid;
@@ -495,200 +603,372 @@ export default function NotesPopup({ open, onClose }) {
           min-height:0;
         }
         .np-collapsed .np-body{ grid-template-columns: 1fr; }
+
         .np-left{
-          border-right:1px solid rgba(255,255,255,.10);
+          border-right:1px solid var(--np-border);
           display:flex; flex-direction:column;
           min-height:0;
+          background: rgba(255,255,255,.01);
         }
         .np-search{
           padding:10px;
-          border-bottom:1px solid rgba(255,255,255,.10);
+          border-bottom:1px solid var(--np-border);
         }
         .np-search input{
           width:100%;
           padding:10px 12px;
           border-radius:12px;
-          border:1px solid rgba(255,255,255,.14);
-          background:rgba(0,0,0,.35);
-          color:#eee;
+          border:1px solid var(--np-border2);
+          background:rgba(0,0,0,.34);
+          color:var(--np-text);
           outline:none;
         }
+
         .np-tree{ padding:10px; overflow:auto; }
+
         .nb{
-          border:1px solid rgba(255,255,255,.10);
-          background: rgba(255,255,255,.04);
+          border:1px solid var(--np-border2);
+          background: var(--np-card);
           border-radius:14px;
           margin-bottom:10px;
           overflow:hidden;
         }
         .nb-head{
           display:flex; align-items:center; justify-content:space-between;
-          padding:10px 10px;
+          padding:10px;
           gap:8px;
-          background: rgba(255,255,255,.04);
-          border-bottom:1px solid rgba(255,255,255,.08);
+          background: rgba(0,0,0,.18);
+          border-bottom:1px solid var(--np-border2);
         }
         .nb-head .name{
-          font-weight:700;
+          font-weight:900;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+          color: var(--np-text);
         }
-        .nb-head .mini{ display:flex; gap:6px; }
+        .mini{ display:flex; gap:6px; }
         .mini button{
           font-size:12px;
           padding:6px 8px;
           border-radius:10px;
-          border:1px solid rgba(255,255,255,.12);
-          background:rgba(0,0,0,.18);
-          color:#eee;
+          border:1px solid var(--np-border2);
+          background:rgba(255,255,255,.03);
+          color:var(--np-text);
           cursor:pointer;
+          font-weight:800;
         }
-        .mini button:hover{background:rgba(255,255,255,.08)}
+        .mini button:hover{background:rgba(255,255,255,.06)}
+
         .chap{
-          padding:8px 10px;
+          padding:10px;
           display:flex; align-items:center; justify-content:space-between;
           gap:10px;
           cursor:pointer;
         }
-        .chap:hover{background:rgba(255,255,255,.06)}
+        .chap:hover{background:rgba(255,255,255,.05)}
         .chap.active{
-          background: rgba(122,62,255,.20);
-          border-left: 3px solid rgba(122,62,255,.85);
+          background: rgba(0,214,255,.12);
+          border-left: 3px solid rgba(0,214,255,.95);
         }
         .chap .ttl{
           font-size:14px;
+          font-weight:800;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+          color: var(--np-text);
         }
-        .chap .meta{font-size:12px; opacity:.7}
+        .chap .meta{font-size:12px; color: var(--np-muted)}
 
         .np-right{
           min-height:0;
           display:flex; flex-direction:column;
         }
+
         .editor-top{
           display:flex; align-items:center; justify-content:space-between;
           padding:10px 12px;
-          border-bottom:1px solid rgba(255,255,255,.10);
+          border-bottom:1px solid var(--np-border);
+          background: rgba(255,255,255,.01);
         }
         .editor-top .path{
-          font-weight:700;
+          font-weight:900;
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+          color: var(--np-text);
         }
+
         .tabs{display:flex; gap:8px}
         .tab{
           padding:8px 10px; border-radius:12px;
-          border:1px solid rgba(255,255,255,.14);
-          background:rgba(255,255,255,.06);
-          cursor:pointer; color:#eee;
-          font-weight:600; font-size:13px;
+          border:1px solid var(--np-border2);
+          background:rgba(255,255,255,.03);
+          cursor:pointer; color:var(--np-text);
+          font-weight:900; font-size:13px;
         }
         .tab.active{
-          border-color: rgba(122,62,255,.5);
-          background: rgba(122,62,255,.25);
+          border-color: rgba(0,214,255,.40);
+          background: rgba(0,214,255,.12);
         }
 
-        /* Toolbar */
         .toolbar{
           display:flex;
           flex-wrap:wrap;
           gap:8px;
           padding:10px 12px;
-          border-bottom:1px solid rgba(255,255,255,.10);
-          background: rgba(0,0,0,.18);
+          border-bottom:1px solid var(--np-border);
+          background: rgba(0,0,0,.20);
         }
         .toolbtn{
-          padding:7px 9px;
+          padding:7px 10px;
           border-radius:12px;
-          border:1px solid rgba(255,255,255,.14);
-          background:rgba(255,255,255,.06);
-          color:#eee;
+          border:1px solid var(--np-border2);
+          background:rgba(255,255,255,.03);
+          color:var(--np-text);
           cursor:pointer;
-          font-weight:700;
+          font-weight:900;
           font-size:13px;
           user-select:none;
         }
-        .toolbtn:hover{background:rgba(255,255,255,.10)}
-        .toolsep{
-          width:1px;
-          background:rgba(255,255,255,.10);
-          margin:0 2px;
-        }
-        .toolhint{
-          font-size:12px;
-          opacity:.75;
-          margin-left:auto;
-          display:flex;
-          align-items:center;
-          gap:10px;
-        }
-        .kbd{
-          border:1px solid rgba(255,255,255,.14);
-          border-bottom-color: rgba(255,255,255,.20);
-          background:rgba(255,255,255,.06);
-          padding:3px 7px;
-          border-radius:8px;
-          font-size:12px;
-        }
-
-        /* AI panel */
-        .ai-panel{
-          padding:10px 12px;
-          border-bottom:1px solid rgba(255,255,255,.10);
-          background: rgba(0,0,0,.12);
-        }
-        .ai-head{
-          display:flex; align-items:center; justify-content:space-between; gap:10px;
-          font-weight:800;
-        }
-        .ai-row{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px}
-        .ai-row select{
-          height:36px;
-        }
-        .ai-prompt{
-          margin-top:10px;
-          width:100%;
-          min-height:70px;
-          resize:vertical;
-        }
+        .toolbtn:hover{background:rgba(255,255,255,.06)}
+        .toolsep{ width:1px; background:var(--np-border2); margin:0 2px; }
 
         .editor{ flex:1; min-height:0; display:grid; grid-template-columns: 1fr; }
+
+        /* ✅ More usable editor area */
         textarea.np-text{
           width:100%; height:100%;
-          padding:14px;
+          padding:16px;
           border:0;
           outline:none;
-          background: rgba(0,0,0,.25);
-          color:#eee;
+          background: rgba(0,0,0,.26);
+          color:var(--np-text);
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-          font-size:14px;
-          line-height:1.5;
+          font-size:15px;
+          line-height:1.6;
           resize:none;
         }
+
         .preview{
-          padding:14px;
+          padding:16px;
           overflow:auto;
           background: rgba(0,0,0,.18);
+          color: var(--np-text);
+
+          /* ✅ important (protect against global nowrap) */
+          white-space: normal;
         }
-        .hint{ font-size:12px; opacity:.75; }
+        .hint{ font-size:12px; color: var(--np-muted); }
+
+        /* ✅ Markdown typography inside preview (UPDATED per your selectors) */
+        .preview :where(h1, h2, h3, h4, h5, h6) {
+          margin: 1.5rem 0 1rem;
+          line-height: 1.3;
+          font-weight: 950;
+          display: block;
+        }
+        .preview h1{ font-size: 22px; }
+        .preview h2{ font-size: 18px; opacity: .98; }
+        .preview h3{ font-size: 16px; opacity: .96; }
+
+        .preview :where(p) {
+          margin: 1rem 0;
+          line-height: 1.65;
+          display: block;
+        }
+
+        .preview :where(ul, ol) {
+          margin: 1rem 0 1rem 1.5rem;
+          padding-left: 1rem;
+          display: block;
+        }
+
+        .preview :where(li) {
+          margin: 0.5rem 0;
+          display: list-item;
+        }
+
+        /* ✅ Prevent the "squashing" effect */
+        .preview .md-render {
+          white-space: pre-wrap;
+          word-wrap: break-word;
+        }
+
+        .preview :where(strong){ font-weight: 950; }
+        .preview :where(em){ opacity: .95; }
+
+        .preview :where(blockquote){
+          margin: 12px 0;
+          padding: 10px 12px;
+          border-left: 3px solid rgba(0,214,255,.75);
+          background: rgba(255,255,255,.03);
+          border-radius: 10px;
+          color: rgba(255,255,255,.82);
+        }
+
+        .preview :where(hr){
+          border: 0;
+          border-top: 1px solid rgba(255,255,255,.10);
+          margin: 14px 0;
+        }
+
+        .preview :where(code){
+          padding: 2px 6px;
+          border-radius: 8px;
+          border: 1px solid rgba(255,255,255,.10);
+          background: rgba(0,0,0,.35);
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+          font-size: .95em;
+        }
+        .preview :where(pre){
+          margin: 12px 0;
+          padding: 12px;
+          border-radius: 14px;
+          border: 1px solid rgba(255,255,255,.10);
+          background: rgba(0,0,0,.38);
+          overflow:auto;
+        }
+        .preview :where(pre code){
+          padding: 0;
+          border: 0;
+          background: transparent;
+        }
+
+        /* ✅ Secret AI “decor” button (low visibility) */
+        .ai-secret{
+          position:absolute;
+          right:10px;
+          bottom:10px;
+          width:18px;
+          height:18px;
+          border-radius:999px;
+          border:1px solid rgba(255,255,255,.10);
+          background: rgba(0,0,0,.45);
+          box-shadow: 0 10px 24px rgba(0,0,0,.45);
+          cursor:pointer;
+          opacity:.28;
+          display:flex;
+          align-items:center;
+          justify-content:center;
+          transition: all .15s ease;
+          z-index:10090;
+        }
+        .ai-secret:hover{
+          opacity:.85;
+          border-color: rgba(0,214,255,.45);
+          background: rgba(0,214,255,.10);
+          transform: scale(1.05);
+        }
+        .ai-secret::after{
+          content:'';
+          width:6px; height:6px;
+          border-radius:999px;
+          background: rgba(0,214,255,.95);
+          box-shadow: 0 0 16px rgba(0,214,255,.55);
+        }
+
+        /* ✅ Floating AI window */
+        .ai-float{
+          position:fixed;
+          z-index:10120;
+          width: 520px;
+          border-radius:16px;
+          border:1px solid rgba(255,255,255,.12);
+          background: rgba(6, 8, 14, .96);
+          box-shadow: 0 18px 60px rgba(0,0,0,.65);
+          overflow:hidden;
+        }
+        .ai-float.min{
+          width: 220px;
+        }
+        .ai-float-head{
+          display:flex;
+          align-items:center;
+          justify-content:space-between;
+          padding:10px 12px;
+          border-bottom:1px solid rgba(255,255,255,.10);
+          background:
+            radial-gradient(500px 100px at 15% 0%, rgba(0,214,255,.12), transparent 60%),
+            rgba(255,255,255,.02);
+          cursor: grab;
+          user-select:none;
+        }
+        .ai-float-title{
+          font-weight:950;
+          color: var(--np-text);
+          display:flex;
+          gap:8px;
+          align-items:center;
+        }
+        .ai-float-actions{ display:flex; gap:8px; }
+        .ai-mini{
+          padding:6px 8px;
+          border-radius:10px;
+          border:1px solid rgba(255,255,255,.10);
+          background: rgba(255,255,255,.03);
+          color: var(--np-text);
+          cursor:pointer;
+          font-weight:900;
+          font-size:12px;
+        }
+        .ai-mini:hover{ background: rgba(255,255,255,.06); }
+        .ai-float-body{
+          padding:10px 12px;
+        }
+        .ai-row{
+          display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+          margin-bottom:10px;
+        }
+        .ai-row select{
+          height:36px;
+          border-radius:12px;
+          border:1px solid rgba(255,255,255,.10);
+          background: rgba(0,0,0,.35);
+          color: var(--np-text);
+          padding:0 10px;
+          outline:none;
+        }
+        .ai-prompt{
+          width:100%;
+          min-height:88px;
+          border-radius:14px;
+          border:1px solid rgba(255,255,255,.10);
+          background: rgba(0,0,0,.30);
+          color: var(--np-text);
+          padding:10px 12px;
+          outline:none;
+          resize: vertical;
+        }
+        .ai-kinds .toolbtn{
+          font-size:12px;
+          padding:7px 10px;
+        }
+        .ai-run{
+          border-color: rgba(0,214,255,.40) !important;
+          background: rgba(0,214,255,.12) !important;
+        }
+        .ai-run:hover{
+          background: rgba(0,214,255,.16) !important;
+        }
       `}</style>
 
       <div className="np-backdrop" onClick={onClose} />
-      <div className={`np-panel ${collapsed ? 'np-collapsed' : ''}`} onClick={(e)=>e.stopPropagation()}>
+
+      <div
+        className={`np-panel ${collapsed ? 'np-collapsed' : ''}`}
+        onClick={(e)=>e.stopPropagation()}
+        style={{ position: 'fixed' }}
+      >
         <div className="np-head">
           <div className="np-title">
-            <span>🗂️ Course Notes</span>
-            <span className="np-pill">
-              {saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}
-            </span>
+            <span>🗂️ Notes</span>
+            <span className="np-pill">{saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}</span>
           </div>
 
           <div className="np-actions">
-            <button className="np-btn" onClick={onImport} title="Import backup">Import</button>
-            <button className="np-btn" onClick={onExport} title="Export backup">Export</button>
+            <button className="np-btn" onClick={onImport}>Import</button>
+            <button className="np-btn" onClick={onExport}>Export</button>
             <button className="np-btn primary" onClick={onNewNotebook}>+ Course</button>
-            <button className="np-btn" onClick={() => setCollapsed(v => !v)} title="Collapse/Expand">
+            <button className="np-btn" onClick={() => setCollapsed(v => !v)}>
               {collapsed ? 'Expand' : 'Collapse'}
             </button>
-            <button className="np-btn" onClick={onClose} title="Close">Close</button>
+            <button className="np-btn" onClick={onClose}>Close</button>
           </div>
 
           <input
@@ -712,47 +992,36 @@ export default function NotesPopup({ open, onClose }) {
               </div>
 
               <div className="np-tree">
-                {filteredNotebooks.length === 0 && (
-                  <div className="hint">No notebooks yet. Create one with “+ Course”.</div>
-                )}
-
                 {filteredNotebooks.map(nb => (
                   <div className="nb" key={nb.id}>
                     <div className="nb-head">
                       <div className="name" title={nb.title}>{nb.title}</div>
                       <div className="mini">
-                        <button onClick={() => onNewChapter(nb)} title="New chapter">+ Ch</button>
-                        <button onClick={() => onRenameNotebook(nb)} title="Rename">Rename</button>
-                        <button onClick={() => onDeleteNotebook(nb)} title="Delete">Del</button>
+                        <button onClick={() => onNewChapter(nb)}>+ Ch</button>
+                        <button onClick={() => onRenameNotebook(nb)}>Rename</button>
+                        <button onClick={() => onDeleteNotebook(nb)}>Del</button>
                       </div>
                     </div>
 
-                    {(nb.chapters || []).length === 0 ? (
-                      <div className="chap" onClick={() => onNewChapter(nb)}>
-                        <div className="ttl">+ Create first chapter</div>
-                        <div className="meta">file</div>
-                      </div>
-                    ) : (
-                      (nb.chapters || []).map(ch => {
-                        const active = (state.active.notebookId === nb.id && state.active.chapterId === ch.id)
-                        return (
-                          <div
-                            key={ch.id}
-                            className={`chap ${active ? 'active' : ''}`}
-                            onClick={() => onSelect(nb.id, ch.id)}
-                          >
-                            <div style={{ minWidth: 0 }}>
-                              <div className="ttl" title={ch.title}>{ch.title}</div>
-                              <div className="meta">{(ch.updatedAt || ch.createdAt || '').slice(0, 10)}</div>
-                            </div>
-                            <div className="mini" onClick={(e) => e.stopPropagation()}>
-                              <button onClick={() => onRenameChapter(nb, ch)} title="Rename file">Ren</button>
-                              <button onClick={() => onDeleteChapter(nb, ch)} title="Delete file">Del</button>
-                            </div>
+                    {(nb.chapters || []).map(ch => {
+                      const active = (state.active.notebookId === nb.id && state.active.chapterId === ch.id)
+                      return (
+                        <div
+                          key={ch.id}
+                          className={`chap ${active ? 'active' : ''}`}
+                          onClick={() => onSelect(nb.id, ch.id)}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div className="ttl" title={ch.title}>{ch.title}</div>
+                            <div className="meta">{(ch.updatedAt || ch.createdAt || '').slice(0, 10)}</div>
                           </div>
-                        )
-                      })
-                    )}
+                          <div className="mini" onClick={(e) => e.stopPropagation()}>
+                            <button onClick={() => onRenameChapter(nb, ch)}>Ren</button>
+                            <button onClick={() => onDeleteChapter(nb, ch)}>Del</button>
+                          </div>
+                        </div>
+                      )
+                    })}
                   </div>
                 ))}
               </div>
@@ -771,90 +1040,25 @@ export default function NotesPopup({ open, onClose }) {
               </div>
             </div>
 
-            {/* Toolbar only when writing & chapter selected */}
             {activeNotebook && activeChapter && editMode === 'write' && (
               <div className="toolbar">
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('bold')} title="Bold">B</button>
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('italic')} title="Italic"><em>I</em></button>
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('underline')} title="Underline (HTML)">U</button>
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('strike')} title="Strikethrough">S</button>
-
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('bold')}>B</button>
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('italic')}><em>I</em></button>
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('underline')}>U</button>
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('strike')}>S</button>
                 <div className="toolsep" />
-
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('h1')} title="Heading 1">H1</button>
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('h2')} title="Heading 2">H2</button>
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('h3')} title="Heading 3">H3</button>
-
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('h1')}>H1</button>
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('h2')}>H2</button>
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('h3')}>H3</button>
                 <div className="toolsep" />
-
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('ul')} title="Bulleted list">• List</button>
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('ol')} title="Numbered list">1. List</button>
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('quote')} title="Quote">&gt;</button>
-
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('ul')}>• List</button>
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('ol')}>1. List</button>
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('quote')}>&gt;</button>
                 <div className="toolsep" />
-
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('code')} title="Inline code">{'{ }'}</button>
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('codeblock')} title="Code block">```</button>
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('link')} title="Insert link">🔗</button>
-                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('hr')} title="Horizontal line">—</button>
-
-                <div className="toolhint">
-                  Tip: select text first
-                  <span className="kbd">Ctrl</span>+<span className="kbd">A</span> to apply on whole doc
-                </div>
-              </div>
-            )}
-
-            {/* AI Panel only when writing & chapter selected */}
-            {activeNotebook && activeChapter && editMode === 'write' && (
-              <div className="ai-panel">
-                <div className="ai-head">
-                  <div>✨ AI Tools</div>
-                  <button className="np-btn" onClick={() => setAiOpen(v => !v)}>{aiOpen ? 'Hide' : 'Show'}</button>
-                </div>
-
-                {aiOpen && (
-                  <>
-                    <div className="ai-row">
-                      <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('summarize')}>Summarize</button>
-                      <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('cheatsheet')}>Cheatsheet</button>
-                      <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('flashcards')}>Flashcards</button>
-                      <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('quiz')}>Quiz</button>
-                      <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('rewrite')}>Rewrite</button>
-                      <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('explain')}>Explain</button>
-                    </div>
-
-                    <div className="ai-row" style={{ alignItems: 'center' }}>
-                      <select
-                        className="select"
-                        value={aiModel}
-                        onChange={(e) => setAiModel(e.target.value)}
-                        disabled={aiBusy}
-                        style={{ height: 36 }}
-                      >
-                        {aiModels.map(m => (
-                          <option key={m.name} value={m.name}>{m.name}</option>
-                        ))}
-                      </select>
-
-                      <button className="np-btn primary" disabled={aiBusy} onClick={runAiCustom}>
-                        {aiBusy ? 'Thinking…' : 'Run'}
-                      </button>
-
-                      <span className="hint" style={{ marginLeft: 'auto' }}>
-                        Output → new chapter
-                      </span>
-                    </div>
-
-                    <textarea
-                      className="select ai-prompt"
-                      placeholder='Ask: “Make 10 exam questions from this chapter”'
-                      value={aiPrompt}
-                      onChange={(e) => setAiPrompt(e.target.value)}
-                      disabled={aiBusy}
-                    />
-                  </>
-                )}
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('code')}>{'{ }'}</button>
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('codeblock')}>```</button>
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('link')}>🔗</button>
+                <button className="toolbtn" onMouseDown={(e) => e.preventDefault()} onClick={() => onToolbar('hr')}>—</button>
               </div>
             )}
 
@@ -869,7 +1073,7 @@ export default function NotesPopup({ open, onClose }) {
                   className="np-text"
                   value={activeChapter.content || ''}
                   onChange={(e) => setChapterContent(e.target.value)}
-                  placeholder={`# ${activeChapter.title}\n\nUse the toolbar above like Word 🙂\n\n- Bold/Italic/Headings/Lists\n- Links, code blocks, quotes\n\n`}
+                  placeholder={`# ${activeChapter.title}\n\nWrite notes here...\n`}
                 />
               </div>
             ) : (
@@ -877,15 +1081,83 @@ export default function NotesPopup({ open, onClose }) {
                 <MarkdownMessage text={activeChapter.content || '_Empty chapter._'} />
               </div>
             )}
-
-            <div style={{ padding: '10px 12px', borderTop: '1px solid rgba(255,255,255,.10)' }}>
-              <div className="hint">
-                Toolbar applies Markdown automatically. AI outputs are saved as new chapters.
-              </div>
-            </div>
           </div>
         </div>
+
+        {/* ✅ Secret “AI” decor button */}
+        <div
+          className="ai-secret"
+          title="AI"
+          onClick={() => {
+            setAiFloatOpen(true)
+            setAiFloatMin(false)
+          }}
+        />
       </div>
+
+      {/* ✅ Floating AI window */}
+      {aiFloatOpen && (
+        <div
+          className={`ai-float ${aiFloatMin ? 'min' : ''}`}
+          style={{ left: aiPos.x, top: aiPos.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="ai-float-head" onMouseDown={onAiDragStart}>
+            <div className="ai-float-title">✨ AI</div>
+            <div className="ai-float-actions">
+              <button className="ai-mini" onClick={() => setAiFloatMin(v => !v)}>
+                {aiFloatMin ? 'Open' : 'Min'}
+              </button>
+              <button className="ai-mini" onClick={() => { setAiFloatOpen(false); setAiFloatMin(false) }}>
+                Close
+              </button>
+            </div>
+          </div>
+
+          {!aiFloatMin && (
+            <div className="ai-float-body">
+              <div className="ai-row ai-kinds">
+                <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('summarize')}>Summarize</button>
+                <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('cheatsheet')}>Cheatsheet</button>
+                <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('flashcards')}>Flashcards</button>
+                <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('quiz')}>Quiz</button>
+                <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('rewrite')}>Rewrite</button>
+                <button className="toolbtn" disabled={aiBusy} onClick={() => runAiKind('explain')}>Explain</button>
+              </div>
+
+              <div className="ai-row">
+                <select value={aiTarget} onChange={(e) => setAiTarget(e.target.value)} disabled={aiBusy}>
+                  <option value="replace">Edit current (replace)</option>
+                  <option value="append">Add to current (append)</option>
+                  <option value="new">New chapter</option>
+                </select>
+
+                <select value={aiModel} onChange={(e) => setAiModel(e.target.value)} disabled={aiBusy}>
+                  {aiModels.map(m => (
+                    <option key={m.name} value={m.name}>{m.name}</option>
+                  ))}
+                </select>
+
+                <button className="ai-mini ai-run" disabled={aiBusy} onClick={runAiCustom}>
+                  {aiBusy ? 'Thinking…' : 'Run'}
+                </button>
+              </div>
+
+              <textarea
+                className="ai-prompt"
+                placeholder='Ask: “Fix just the last section and add an example.”'
+                value={aiPrompt}
+                onChange={(e) => setAiPrompt(e.target.value)}
+                disabled={aiBusy}
+              />
+
+              <div className="hint" style={{ marginTop: 8 }}>
+                Output: <b style={{ color: 'rgba(0,214,255,.95)' }}>{aiTarget}</b>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </>
   )
 }
